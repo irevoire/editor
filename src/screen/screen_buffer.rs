@@ -1,6 +1,6 @@
 use std::{
     io::{self, Write},
-    ops,
+    ops::{self, Deref},
 };
 
 use crossterm::{
@@ -57,6 +57,14 @@ impl ScreenBuffer {
             stdout.queue(PrintStyledContent(content.clone()))?;
         }
         stdout.flush()
+    }
+
+    pub fn as_full_sub_screen_buffer<'a>(&'a mut self) -> SubScreenBuffer<'a> {
+        SubScreenBuffer {
+            bottom_right: (self.height(), self.width()),
+            screen_buffer: self,
+            top_left: (0, 0),
+        }
     }
 
     pub fn sub_screen_buffer<'a>(

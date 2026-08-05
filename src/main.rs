@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    action::{Action, Anchor, Direction},
+    action::{Action, Anchor, DeleteDirection, Direction},
     screen::{screen_buffer::SubScreenBuffer, Screen},
     server::{Buffer, Server, ServerHandle},
 };
@@ -90,44 +90,6 @@ pub struct Editor {
     mode: Mode,
 }
 
-pub struct BufferView {
-    width: usize,
-    height: usize,
-    top_line: usize,
-    selection: Selection,
-    buffer: Arc<Buffer>,
-}
-
-impl BufferView {
-    fn insert(&mut self, server: &ServerHandle, c: char) -> ActionResult {
-        let mut rope = self.buffer.rope.blocking_write();
-        let offset = rope.line_to_char(self.selection.head.line);
-        let insert_at_char = offset + self.selection.head.column;
-        rope.insert_char(insert_at_char, c);
-        self.selection.head.column += 1;
-        ActionResult::Redraw
-    }
-
-    fn redraw(&self, buffer: &mut SubScreenBuffer) {
-        let rope = self.buffer.rope.blocking_read();
-        let gutter_width = (self.top_line + buffer.height()).ilog10() + 1;
-        for (line_idx, line) in rope.lines_at(self.top_line).enumerate() {
-            let gutter = format!(
-                "{:width$}|",
-                self.top_line + line_idx,
-                width = (gutter_width - 1) as usize
-            );
-            for (i, c) in gutter.chars().enumerate() {
-                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c);
-            }
-            for (i, c) in line.chars().enumerate() {
-                let i = i + gutter_width as usize;
-                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c);
-            }
-        }
-    }
-}
-
 pub enum ActionResult {
     Redraw,
     Exit,
@@ -160,6 +122,7 @@ impl Editor {
             }
             Action::MoveAnchor(anchor, direction) => self.screen.move_anchor(anchor, direction),
             Action::Insert(c) => self.screen.insert(c),
+            Action::Delete(delete_direction) => self.screen.delete(delete_direction),
         }
     }
 
@@ -173,7 +136,8 @@ impl Editor {
             Event::FocusGained => Some(Action::FocusGained),
             Event::FocusLost => Some(Action::FocusLost),
             Event::Key(key_event) => match key_event.code {
-                KeyCode::Backspace => todo!(),
+                KeyCode::Backspace => Some(Action::Delete(DeleteDirection::Left)),
+                KeyCode::Delete => Some(Action::Delete(DeleteDirection::Right)),
                 KeyCode::Enter if self.mode == Mode::Insert => Some(Action::Insert('\n')),
                 KeyCode::Enter => None,
                 KeyCode::Left => Some(Action::MoveAnchor(Anchor::Head, Direction::Left)),
@@ -187,9 +151,8 @@ impl Editor {
                 KeyCode::Tab if self.mode == Mode::Insert => Some(Action::Insert('\t')),
                 KeyCode::Tab => None,
                 KeyCode::BackTab => todo!(),
-                KeyCode::Delete => todo!(),
                 KeyCode::Insert => Some(Action::ChangeMode(Mode::Insert)),
-                KeyCode::F(_) => todo!(),
+                KeyCode::F(_) => None,
                 KeyCode::Char(c) if self.mode == Mode::Insert => Some(Action::Insert(c)),
                 KeyCode::Char(c) => match c {
                     'q' => Some(Action::Quit),
@@ -197,15 +160,15 @@ impl Editor {
                     _ => None,
                 },
 
-                KeyCode::Null => todo!(),
+                KeyCode::Null => None,
                 KeyCode::Esc => Some(Action::ChangeMode(Mode::Normal)),
-                KeyCode::CapsLock => todo!(),
-                KeyCode::ScrollLock => todo!(),
-                KeyCode::NumLock => todo!(),
-                KeyCode::PrintScreen => todo!(),
-                KeyCode::Pause => todo!(),
-                KeyCode::Menu => todo!(),
-                KeyCode::KeypadBegin => todo!(),
+                KeyCode::CapsLock => None,
+                KeyCode::ScrollLock => None,
+                KeyCode::NumLock => None,
+                KeyCode::PrintScreen => None,
+                KeyCode::Pause => None,
+                KeyCode::Menu => None,
+                KeyCode::KeypadBegin => None,
                 KeyCode::Media(media_key_code) => todo!(),
                 KeyCode::Modifier(modifier_key_code) => todo!(),
             },

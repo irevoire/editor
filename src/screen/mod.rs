@@ -5,13 +5,14 @@ use crossterm::{
 use std::io;
 
 use crate::{
-    action::{Anchor, Direction},
-    screen::screen_buffer::ScreenBuffer,
+    action::{Anchor, DeleteDirection, Direction},
+    screen::{screen_buffer::ScreenBuffer, view::buffer_view::BufferView},
     server::ServerHandle,
-    ActionResult, BufferView, Selection,
+    ActionResult, Selection,
 };
 
 pub mod screen_buffer;
+pub mod view;
 
 pub struct Screen {
     stdout: io::Stdout,
@@ -115,7 +116,11 @@ impl Screen {
     }
 
     pub fn insert(&mut self, c: char) -> ActionResult {
-        self.view.insert(&self.server, c)
+        self.view.insert(c)
+    }
+
+    pub fn delete(&mut self, delete_direction: DeleteDirection) -> ActionResult {
+        self.view.delete(delete_direction)
     }
 
     pub fn change_mode(&mut self, mode: crate::Mode) -> ActionResult {

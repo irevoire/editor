@@ -1,5 +1,6 @@
 use crate::Mode;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Quit,
     FocusGained,
@@ -9,8 +10,16 @@ pub enum Action {
     ChangeMode(Mode),
     MoveAnchor(Anchor, Direction),
     Insert(char),
+    Delete(DeleteDirection),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum DeleteDirection {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Direction {
     Up,
     Down,
@@ -26,6 +35,7 @@ pub enum Direction {
     PageDown,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Anchor {
     Tail,
     Head,
