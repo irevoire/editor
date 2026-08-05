@@ -1,6 +1,9 @@
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
 };
 
 use ropey::Rope;
@@ -34,7 +37,7 @@ impl ServerHandle {
         let _ = receiver.recv();
     }
 
-    pub fn current_buffer(&self) -> BufferId {
+    pub fn current_buffer(&self) -> (BufferId, Arc<Buffer>) {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::GlobalQuery(GlobalQuery::GetDefaultBuffer(sender)))

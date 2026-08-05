@@ -1,4 +1,6 @@
-use crate::server::BufferId;
+use std::sync::Arc;
+
+use crate::server::{Buffer, BufferId};
 
 #[derive(Debug)]
 pub enum Command {
@@ -14,8 +16,8 @@ pub enum GlobalCommand {
 
 #[derive(Debug)]
 pub enum GlobalQuery {
-    GetDefaultBuffer(oneshot::Sender<BufferId>),
-    CreateScratchBuffer(oneshot::Sender<BufferId>),
+    GetDefaultBuffer(oneshot::Sender<(BufferId, Arc<Buffer>)>),
+    CreateScratchBuffer(oneshot::Sender<(BufferId, Arc<Buffer>)>),
 }
 
 #[derive(Debug)]

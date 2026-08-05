@@ -27,6 +27,6 @@ pub enum Direction {
 }
 
 pub enum Anchor {
-    Start,
-    End,
+    Tail,
+    Head,
 }

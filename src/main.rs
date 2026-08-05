@@ -1,24 +1,20 @@
 use crossterm::{
-    cursor::MoveTo,
     event::{Event, KeyCode},
-    style::{Print, Stylize},
-    terminal::{
-        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
-        LeaveAlternateScreen,
-    },
-    ExecutableCommand, QueueableCommand,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
 };
 use env_logger::{Builder, Env, Target};
+
 use std::{
-    collections::VecDeque,
-    io::{self, BufWriter, Write},
-    panic::{catch_unwind, AssertUnwindSafe},
+    io::{self, BufWriter},
+    panic::catch_unwind,
+    sync::Arc,
 };
 
 use crate::{
-    action::{Action, Anchor, Direction},
+    action::Action,
     screen::Screen,
-    server::{BufferId, Server, ServerHandle},
+    server::{Buffer, Server, ServerHandle},
 };
 
 mod action;
@@ -38,8 +34,7 @@ fn init_logger() {
     Builder::from_env(env).target(Target::Pipe(writer)).init();
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     init_logger();
 
     enable_raw_mode().unwrap();
@@ -47,9 +42,9 @@ async fn main() {
     let server = Server::new();
     let mut stdout = std::io::stdout();
     stdout.execute(EnterAlternateScreen).unwrap();
-    let editor = Editor::new(server.clone(), stdout);
 
-    let ret = catch_unwind(move || editor.run());
+    let s = server.clone();
+    let ret = catch_unwind(move || Editor::run(s, stdout));
     if let Err(panic) = ret {
         match panic.downcast::<&str>() {
             Ok(panic) => log::error!("{panic}"),
@@ -81,11 +76,11 @@ pub struct Selection {
     head: Cursor,
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     Normal,
-    Insertion,
+    Insert,
 }
 
 pub struct Editor {
@@ -98,17 +93,17 @@ pub struct BufferView {
     width: usize,
     height: usize,
     top_line: usize,
-    nb_line: usize,
-    buffer: BufferId,
     selection: Selection,
-    content: VecDeque<String>,
+    buffer: Arc<Buffer>,
 }
 
 impl BufferView {
     fn insert(&mut self, server: &ServerHandle, c: char) {
-        let insert = self.selection.head;
-        let in_view = insert.line - self.top_line;
-        self.content[in_view].insert(insert.column, c);
+        let mut rope = self.buffer.rope.blocking_write();
+        let offset = rope.line_to_char(self.selection.head.line);
+        let insert_at_char = offset + self.selection.head.column;
+        rope.insert_char(insert_at_char, c);
+        self.selection.head.column += 1;
     }
 }
 
@@ -132,7 +127,10 @@ impl Editor {
             Action::FocusLost => self.screen.focus_lost(),
             Action::Redraw => self.screen.redraw(),
             Action::Paste(_) => todo!(),
-            Action::ChangeMode(mode) => self.mode = mode,
+            Action::ChangeMode(mode) => {
+                self.mode = mode;
+                self.screen.change_mode(mode);
+            }
             Action::MoveAnchor(anchor, direction) => self.screen.move_anchor(anchor, direction),
             Action::Insert(c) => self.screen.insert(c),
         }
@@ -159,12 +157,12 @@ impl Editor {
                 KeyCode::Tab => todo!(),
                 KeyCode::BackTab => todo!(),
                 KeyCode::Delete => todo!(),
-                KeyCode::Insert => Some(Action::ChangeMode(Mode::Insertion)),
+                KeyCode::Insert => Some(Action::ChangeMode(Mode::Insert)),
                 KeyCode::F(_) => todo!(),
-                KeyCode::Char(c) if self.mode == Mode::Insertion => Some(Action::Insert(c)),
+                KeyCode::Char(c) if self.mode == Mode::Insert => Some(Action::Insert(c)),
                 KeyCode::Char(c) => match c {
                     'q' => Some(Action::Quit),
-                    'i' => Some(Action::ChangeMode(Mode::Insertion)),
+                    'i' => Some(Action::ChangeMode(Mode::Insert)),
                     _ => None,
                 },
 
@@ -186,17 +184,18 @@ impl Editor {
         }
     }
 
-    fn run(mut self) {
+    pub fn run(server: ServerHandle, stdout: io::Stdout) {
+        let mut this = Self::new(server, stdout);
         loop {
             let key = crossterm::event::read().unwrap();
-            let Some(action) = self.event_to_action(key) else {
+            let Some(action) = this.event_to_action(key) else {
                 continue;
             };
-            let exit = self.process_action(action);
+            let exit = this.process_action(action);
             if exit {
                 break;
             }
-            self.screen.redraw();
+            this.screen.redraw();
         }
         log::info!("redraw the screen");
     }

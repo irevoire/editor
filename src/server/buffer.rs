@@ -1,15 +1,13 @@
-use std::{
-    ops::{Index, IndexMut},
-    path::PathBuf,
-};
+use std::{fmt, ops::Index, path::PathBuf, sync::Arc};
 
 use ropey::Rope;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BufferId(usize);
 
 #[derive(Default)]
-pub struct Buffers(Vec<Buffer>);
+pub struct Buffers(Vec<Arc<Buffer>>);
 
 impl Index<BufferId> for Buffers {
     type Output = Buffer;
@@ -19,52 +17,57 @@ impl Index<BufferId> for Buffers {
     }
 }
 
-impl IndexMut<BufferId> for Buffers {
-    fn index_mut(&mut self, index: BufferId) -> &mut Self::Output {
-        &mut self.0[index.0]
-    }
-}
-
 impl Buffers {
     pub fn new() -> Self {
         Self::default()
     }
 
     // Return the last buffer opened
-    pub fn last_bufferid_opened(&self) -> Option<BufferId> {
+    pub fn last_bufferid_opened(&self) -> Option<(BufferId, Arc<Buffer>)> {
         if self.0.is_empty() {
             None
         } else {
-            Some(BufferId(1))
+            Some((BufferId(1), self.0[0].clone()))
         }
     }
 
-    pub fn new_scratch(&mut self) -> BufferId {
+    pub fn new_scratch(&mut self) -> (BufferId, Arc<Buffer>) {
         let id = self.0.len();
-        self.0.push(Buffer {
+        let buffer = Arc::new(Buffer {
             name: String::from("scratch"),
             path: None,
-            content: Rope::new(),
+            rope: Rope::new().into(),
         });
-        BufferId(id)
+        self.0.push(buffer.clone());
+        (BufferId(id), buffer)
     }
 }
 
 pub struct Buffer {
-    name: String,
-    path: Option<PathBuf>,
-    content: Rope,
+    pub name: String,
+    pub path: Option<PathBuf>,
+    pub rope: RwLock<Rope>,
+}
+
+impl fmt::Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Buffer")
+            .field("name", &self.name)
+            .field("path", &self.path)
+            .field("content", &"...")
+            .finish()
+    }
 }
 
 impl Buffer {
     pub fn get_lines_at(&self, start: usize, len: usize) -> Vec<String> {
-        match self.content.get_lines_at(start) {
+        match self.rope.blocking_read().get_lines_at(start) {
             None => Vec::new(),
             Some(lines) => lines.take(len).map(|line| line.to_string()).collect(),
         }
     }
 
     pub fn get_nb_lines(&self) -> usize {
-        self.content.len_lines()
+        self.rope.blocking_read().len_lines()
     }
 }

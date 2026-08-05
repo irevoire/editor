@@ -1,10 +1,18 @@
-use std::ops;
+use std::{
+    io::{self, Write},
+    ops,
+};
 
-use crossterm::style::{ContentStyle, StyledContent};
+use crossterm::{
+    cursor::{MoveRight, MoveTo},
+    style::{ContentStyle, PrintStyledContent, StyledContent},
+    terminal::{Clear, ClearType},
+    ExecutableCommand, QueueableCommand,
+};
 
 pub struct ScreenBuffer {
-    width: usize,
     height: usize,
+    width: usize,
     buffer: Vec<StyledContent<char>>,
 }
 
@@ -18,10 +26,18 @@ impl ScreenBuffer {
         }
     }
 
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     pub fn display_as_text(&self) -> String {
         let mut output = String::new();
         for (idx, c) in self.buffer.iter().enumerate() {
-            if idx != 0 && idx % self.width == 0 {
+            if idx != 0 && idx % self.width() == 0 {
                 output.push('\n');
             }
             output.push(*c.content());
@@ -29,7 +45,21 @@ impl ScreenBuffer {
         output
     }
 
-    pub fn sub_view<'a>(
+    pub fn display_on_screen(&self, stdout: &mut io::Stdout) -> io::Result<()> {
+        stdout.queue(MoveTo(0, 0))?;
+        let mut line = 0;
+        for (idx, content) in self.buffer.iter().enumerate() {
+            if idx != 0 && idx % self.width() == 0 {
+                line += 1;
+                stdout.queue(MoveTo(0, line))?;
+            }
+
+            stdout.queue(PrintStyledContent(content.clone()))?;
+        }
+        stdout.flush()
+    }
+
+    pub fn sub_screen_buffer<'a>(
         &'a mut self,
         top_left: (usize, usize),
         bottom_right: (usize, usize),
@@ -79,6 +109,16 @@ pub struct SubScreenBuffer<'a> {
     screen_buffer: &'a mut ScreenBuffer,
     top_left: (usize, usize),
     bottom_right: (usize, usize),
+}
+
+impl<'a> SubScreenBuffer<'a> {
+    pub fn height(&self) -> usize {
+        self.bottom_right.0 - self.top_left.0
+    }
+
+    pub fn width(&self) -> usize {
+        self.bottom_right.1 - self.top_left.1
+    }
 }
 
 impl<'a, T> ops::Index<(T, T)> for SubScreenBuffer<'a>
@@ -157,19 +197,19 @@ mod test {
     #[test]
     fn basic_sub_view_print() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let mut status_view = screen.sub_view((8, 0), (9, 9));
+        let mut status_view = screen.sub_screen_buffer((8, 0), (9, 9));
 
         for (i, c) in "status bar".chars().enumerate() {
             status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-');
             status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c);
         }
 
-        let mut tabs_view = screen.sub_view((0, 0), (1, 9));
+        let mut tabs_view = screen.sub_screen_buffer((0, 0), (1, 9));
         for (i, c) in "|tabs|tabs".chars().enumerate() {
             tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c);
             tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-');
         }
-        let mut code_view = screen.sub_view((2, 0), (8, 9));
+        let mut code_view = screen.sub_screen_buffer((2, 0), (8, 9));
         for (i, c) in "Gutter".chars().enumerate() {
             code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c);
             code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|');
@@ -224,41 +264,41 @@ mod test {
     #[should_panic]
     fn sub_screen_out_of_bound_on_col() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((0, 0), (0, 10));
+        let _sub = screen.sub_screen_buffer((0, 0), (0, 10));
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_out_of_bound_on_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((0, 0), (10, 0));
+        let _sub = screen.sub_screen_buffer((0, 0), (10, 0));
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((0, 0), (10, 10));
+        let _sub = screen.sub_screen_buffer((0, 0), (10, 10));
     }
 
     #[test]
     #[should_panic]
     fn big_sub_screen_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((0, 0), (10000, 1000000));
+        let _sub = screen.sub_screen_buffer((0, 0), (10000, 1000000));
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_inverted_column() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((0, 2), (9, 1));
+        let _sub = screen.sub_screen_buffer((0, 2), (9, 1));
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_inverted_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_view((2, 0), (1, 9));
+        let _sub = screen.sub_screen_buffer((2, 0), (1, 9));
     }
 }
