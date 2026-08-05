@@ -1,5 +1,6 @@
 use crossterm::{
     event::{Event, KeyCode},
+    style::{ContentStyle, StyledContent},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -12,8 +13,8 @@ use std::{
 };
 
 use crate::{
-    action::Action,
-    screen::Screen,
+    action::{Action, Anchor, Direction},
+    screen::{screen_buffer::SubScreenBuffer, Screen},
     server::{Buffer, Server, ServerHandle},
 };
 
@@ -98,13 +99,39 @@ pub struct BufferView {
 }
 
 impl BufferView {
-    fn insert(&mut self, server: &ServerHandle, c: char) {
+    fn insert(&mut self, server: &ServerHandle, c: char) -> ActionResult {
         let mut rope = self.buffer.rope.blocking_write();
         let offset = rope.line_to_char(self.selection.head.line);
         let insert_at_char = offset + self.selection.head.column;
         rope.insert_char(insert_at_char, c);
         self.selection.head.column += 1;
+        ActionResult::Redraw
     }
+
+    fn redraw(&self, buffer: &mut SubScreenBuffer) {
+        let rope = self.buffer.rope.blocking_read();
+        let gutter_width = (self.top_line + buffer.height()).ilog10() + 1;
+        for (line_idx, line) in rope.lines_at(self.top_line).enumerate() {
+            let gutter = format!(
+                "{:width$}|",
+                self.top_line + line_idx,
+                width = (gutter_width - 1) as usize
+            );
+            for (i, c) in gutter.chars().enumerate() {
+                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c);
+            }
+            for (i, c) in line.chars().enumerate() {
+                let i = i + gutter_width as usize;
+                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c);
+            }
+        }
+    }
+}
+
+pub enum ActionResult {
+    Redraw,
+    Exit,
+    Nothing,
 }
 
 impl Editor {
@@ -117,11 +144,11 @@ impl Editor {
     }
 
     /// Returns `true` if we should exit
-    pub fn process_action(&mut self, action: Action) -> bool {
+    pub fn process_action(&mut self, action: Action) -> ActionResult {
         match action {
             Action::Quit => {
                 self.server.stop();
-                return true;
+                ActionResult::Exit
             }
             Action::FocusGained => self.screen.focus_gained(),
             Action::FocusLost => self.screen.focus_lost(),
@@ -129,13 +156,15 @@ impl Editor {
             Action::Paste(_) => todo!(),
             Action::ChangeMode(mode) => {
                 self.mode = mode;
-                self.screen.change_mode(mode);
+                self.screen.change_mode(mode)
             }
             Action::MoveAnchor(anchor, direction) => self.screen.move_anchor(anchor, direction),
             Action::Insert(c) => self.screen.insert(c),
         }
-        // by default everything returns false
-        false
+    }
+
+    pub fn redraw(&mut self) {
+        self.screen.redraw();
     }
 
     fn event_to_action(&self, event: Event) -> Option<Action> {
@@ -145,16 +174,18 @@ impl Editor {
             Event::FocusLost => Some(Action::FocusLost),
             Event::Key(key_event) => match key_event.code {
                 KeyCode::Backspace => todo!(),
-                KeyCode::Enter => todo!(),
-                KeyCode::Left => todo!(),
-                KeyCode::Right => todo!(),
-                KeyCode::Up => todo!(),
-                KeyCode::Down => todo!(),
-                KeyCode::Home => todo!(),
-                KeyCode::End => todo!(),
-                KeyCode::PageUp => todo!(),
-                KeyCode::PageDown => todo!(),
-                KeyCode::Tab => todo!(),
+                KeyCode::Enter if self.mode == Mode::Insert => Some(Action::Insert('\n')),
+                KeyCode::Enter => None,
+                KeyCode::Left => Some(Action::MoveAnchor(Anchor::Head, Direction::Left)),
+                KeyCode::Right => Some(Action::MoveAnchor(Anchor::Head, Direction::Right)),
+                KeyCode::Up => Some(Action::MoveAnchor(Anchor::Head, Direction::Up)),
+                KeyCode::Down => Some(Action::MoveAnchor(Anchor::Head, Direction::Down)),
+                KeyCode::Home => Some(Action::MoveAnchor(Anchor::Head, Direction::StartOfLine)),
+                KeyCode::End => Some(Action::MoveAnchor(Anchor::Head, Direction::EndOfLine)),
+                KeyCode::PageUp => Some(Action::MoveAnchor(Anchor::Head, Direction::PageUp)),
+                KeyCode::PageDown => Some(Action::MoveAnchor(Anchor::Head, Direction::PageDown)),
+                KeyCode::Tab if self.mode == Mode::Insert => Some(Action::Insert('\t')),
+                KeyCode::Tab => None,
                 KeyCode::BackTab => todo!(),
                 KeyCode::Delete => todo!(),
                 KeyCode::Insert => Some(Action::ChangeMode(Mode::Insert)),
@@ -192,10 +223,11 @@ impl Editor {
                 continue;
             };
             let exit = this.process_action(action);
-            if exit {
-                break;
+            match exit {
+                ActionResult::Exit => break,
+                ActionResult::Nothing => (),
+                ActionResult::Redraw => this.redraw(),
             }
-            this.screen.redraw();
         }
         log::info!("redraw the screen");
     }

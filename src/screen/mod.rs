@@ -8,10 +8,10 @@ use crate::{
     action::{Anchor, Direction},
     screen::screen_buffer::ScreenBuffer,
     server::ServerHandle,
-    BufferView, Selection,
+    ActionResult, BufferView, Selection,
 };
 
-mod screen_buffer;
+pub mod screen_buffer;
 
 pub struct Screen {
     stdout: io::Stdout,
@@ -42,23 +42,31 @@ impl Screen {
         }
     }
 
-    pub fn focus_gained(&mut self) {
+    pub fn focus_gained(&mut self) -> ActionResult {
         self.stdout
             .execute(crossterm::cursor::SetCursorStyle::BlinkingBlock)
             .unwrap();
+        ActionResult::Nothing
     }
 
-    pub fn focus_lost(&mut self) {
+    pub fn focus_lost(&mut self) -> ActionResult {
         self.stdout
             .execute(crossterm::cursor::SetCursorStyle::SteadyBlock)
             .unwrap();
+        ActionResult::Nothing
     }
 
-    pub fn redraw(&mut self) {
+    pub fn redraw(&mut self) -> ActionResult {
+        self.view.redraw(
+            &mut self
+                .buffer
+                .sub_screen_buffer((0, 0), (self.buffer.height() - 3, self.buffer.width() - 1)),
+        );
         self.buffer.display_on_screen(&mut self.stdout).unwrap();
+        ActionResult::Nothing
     }
 
-    pub fn move_anchor(&mut self, anchor: Anchor, direction: Direction) {
+    pub fn move_anchor(&mut self, anchor: Anchor, direction: Direction) -> ActionResult {
         let anchor = match anchor {
             Anchor::Tail => &mut self.view.selection.tail,
             Anchor::Head => &mut self.view.selection.head,
@@ -67,7 +75,7 @@ impl Screen {
         match direction {
             Direction::Up => {
                 if anchor.line == 0 {
-                    return;
+                    return ActionResult::Nothing;
                 } else if anchor.line == self.view.top_line {
                     self.view.top_line -= 1;
                 } else {
@@ -76,7 +84,7 @@ impl Screen {
             }
             Direction::Down => {
                 if anchor.line == rope.len_lines() {
-                    return;
+                    return ActionResult::Nothing;
                 }
                 // we've reached the bottom of the screen. We move all the text but not the anchor
                 if anchor.line == self.view.top_line + self.view.height {
@@ -103,13 +111,14 @@ impl Screen {
             Direction::PageUp => todo!(),
             Direction::PageDown => todo!(),
         }
+        ActionResult::Redraw
     }
 
-    pub fn insert(&mut self, c: char) {
-        self.view.insert(&self.server, c);
+    pub fn insert(&mut self, c: char) -> ActionResult {
+        self.view.insert(&self.server, c)
     }
 
-    pub fn change_mode(&mut self, mode: crate::Mode) {
+    pub fn change_mode(&mut self, mode: crate::Mode) -> ActionResult {
         let s = format!("{mode:?}");
         let middle = self.buffer.width() / 2;
         let start_writing_at = middle - s.len() / 2;
@@ -119,5 +128,6 @@ impl Screen {
             self.buffer[(last_line, start_writing_at + i)] =
                 StyledContent::new(ContentStyle::default(), c);
         }
+        ActionResult::Redraw
     }
 }
