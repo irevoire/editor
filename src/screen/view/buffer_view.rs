@@ -128,15 +128,15 @@ mod test {
         dbg!(&view.buffer.rope);
         assert_snapshot!(buffer.display_as_text(), @r"
         248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
-                                                                                                                      
-        250| These measures will, of course, be different in different count                                          
-                                                                                                                      
-        252| Nevertheless, in most advanced countries, the following will be pretty generally applic                  
-                                                                                                                      
-        254| 1. Abolition of property in land and application of all rents of land to public purp                     
-        255| 2. A heavy progressive or graduated income                                                               
-        256| 3. Abolition of all rights of inherit                                                                    
-        257| 4. Confiscation of the property of all emigrants and re
+        249|                                                                                                          
+        250| These measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
         ");
     }
 }
