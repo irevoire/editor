@@ -1,12 +1,14 @@
-use std::sync::Arc;
+use std::{io::Stdout, sync::Arc};
 
 use crossterm::style::{ContentStyle, StyledContent};
 
+#[cfg(test)]
+use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
-    action::DeleteDirection,
+    action::{Anchor, DeleteDirection, Direction},
     screen::{screen_buffer::SubScreenBuffer, view::RopeGraphemes},
     server::Buffer,
-    ActionResult, Cursor, Selection,
+    ActionResult, Cursor, Selection, SelectionMode,
 };
 
 pub struct BufferView {
@@ -18,6 +20,63 @@ pub struct BufferView {
 }
 
 impl BufferView {
+    pub fn move_anchor(
+        &mut self,
+        anchor: Anchor,
+        direction: Direction,
+        mode: SelectionMode,
+    ) -> ActionResult {
+        let mut main_anchor = match anchor {
+            Anchor::Tail => self.selection.tail,
+            Anchor::Head => self.selection.head,
+        };
+        let rope = self.buffer.rope.blocking_read();
+        match direction {
+            Direction::Up => {
+                if main_anchor.line == 0 {
+                    return ActionResult::Nothing;
+                } else if main_anchor.line == self.top_line {
+                    self.top_line -= 1;
+                } else {
+                    main_anchor.line -= 1;
+                }
+            }
+            Direction::Down => {
+                if main_anchor.line == rope.len_lines() {
+                    return ActionResult::Nothing;
+                }
+                // we've reached the bottom of the screen. We move all the text but not the anchor
+                if main_anchor.line == self.top_line + self.height {
+                    self.top_line += 1;
+                } else {
+                    main_anchor.line += 1;
+                }
+            }
+            Direction::Right => {
+                main_anchor.column = main_anchor
+                    .column
+                    .saturating_add(1)
+                    .min(rope.line(main_anchor.line).len_chars())
+            }
+            Direction::Left => main_anchor.column = main_anchor.column.saturating_sub(1),
+            Direction::StartOfLine => main_anchor.column = 0,
+            Direction::EndOfLine => main_anchor.column = rope.line(main_anchor.line).len_chars(),
+            Direction::StartOfFile => {
+                self.top_line = 0;
+                main_anchor.line = 0;
+                main_anchor.column = 0;
+            }
+            Direction::EndOfFile => todo!(),
+            Direction::PageUp => todo!(),
+            Direction::PageDown => todo!(),
+        }
+        if mode == SelectionMode::Char {
+            self.selection.head = main_anchor;
+            self.selection.tail = main_anchor;
+        }
+        ActionResult::Redraw
+    }
+
     pub fn insert(&mut self, c: char) -> ActionResult {
         let mut rope = self.buffer.rope.blocking_write();
         let offset = rope.line_to_char(self.selection.head.line);
@@ -49,7 +108,10 @@ impl BufferView {
     /// This is mostly used for testing purposes as it draw the cursor as an unicode character
     /// instead of drawing an actual cursor on the screen.
     /// See `set_cursor` instead.
+    #[cfg(test)]
     pub fn draw_selection(&self, buffer: &mut SubScreenBuffer) {
+        use crate::Cursor;
+
         const BOX_MODIFIER: char = '\u{20DE}';
         const UNDERLINE_MODIFIER: char = '\u{0332}';
         const DOUBLE_UNDERLINE_MODIFIER: char = '\u{0333}';
@@ -99,10 +161,24 @@ impl BufferView {
         }
     }
 
+    #[cfg(test)]
+    pub fn draw_and_display(&self, buffer: &mut ScreenBuffer) -> String {
+        self.draw(&mut buffer.as_full_sub_screen_buffer());
+        self.draw_selection(&mut buffer.as_full_sub_screen_buffer());
+        buffer.display_as_text()
+    }
+
     pub fn draw(&self, buffer: &mut SubScreenBuffer) {
         let rope = self.buffer.rope.blocking_read();
+
         // The number of chars needed for the raw number + 2 for the `| `
         let gutter_width = ((self.top_line + buffer.height()) as f32).log10().ceil() as usize + 2;
+        let screen_cursor = Cursor {
+            line: self.selection.head.line - self.top_line,
+            column: self.selection.head.column + gutter_width,
+        };
+        buffer.set_cursor(screen_cursor);
+
         for (line_idx, line) in rope
             .lines_at(self.top_line)
             .enumerate()
@@ -140,7 +216,7 @@ impl BufferView {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use insta::assert_snapshot;
     use ropey::Rope;
     use tokio::sync::RwLock;
@@ -149,7 +225,7 @@ mod test {
 
     use super::*;
 
-    fn setup_buffer_view() -> (ScreenBuffer, BufferView) {
+    pub fn setup_buffer_view() -> (ScreenBuffer, BufferView) {
         let width = 110;
         let height = 10;
         let view = BufferView {
@@ -180,13 +256,70 @@ mod test {
     #[test]
     fn basic_display() {
         let (mut buffer, view) = setup_buffer_view();
-        view.draw(&mut buffer.as_full_sub_screen_buffer());
-        view.draw_selection(&mut buffer.as_full_sub_screen_buffer());
 
-        assert_snapshot!(buffer.display_as_text(), @r"
+        assert_snapshot!(view.draw_and_display(&mut buffer), @r"
         248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
         249|                                                                                                          
         250| T⃞hese measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+    }
+
+    #[test]
+    fn move_anchor_basic() {
+        let (mut buffer, mut view) = setup_buffer_view();
+        assert_snapshot!(view.draw_and_display(&mut buffer), @r"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|                                                                                                          
+        250| T⃞hese measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+
+        view.move_anchor(Anchor::Head, Direction::Right, SelectionMode::Char);
+        assert_snapshot!(view.draw_and_display(&mut buffer), @r"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|                                                                                                          
+        250| Th⃞ese measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+
+        view.move_anchor(Anchor::Head, Direction::Up, SelectionMode::Char);
+        assert_snapshot!(view.draw_and_display(&mut buffer), @r"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|   ⃞                                                                                                       
+        250| These measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+
+        view.move_anchor(Anchor::Head, Direction::Down, SelectionMode::Char);
+        assert_snapshot!(view.draw_and_display(&mut buffer), @r"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|                                                                                                          
+        250| Th⃞ese measures will, of course, be different in different countries.                                     
         251|                                                                                                          
         252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
         253|                                                                                                          

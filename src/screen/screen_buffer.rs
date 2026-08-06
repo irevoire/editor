@@ -14,15 +14,17 @@ use crate::Cursor;
 pub struct ScreenBuffer {
     height: usize,
     width: usize,
+    cursor: Cursor,
     buffer: Vec<StyledContent<String>>,
 }
 
 impl ScreenBuffer {
     pub fn new(width: usize, height: usize) -> Self {
-        let c = StyledContent::new(ContentStyle::new(), " ".to_string());
+        let c = StyledContent::new(ContentStyle::new(), "".to_string());
         Self {
             width,
             height,
+            cursor: Cursor { line: 0, column: 0 },
             buffer: vec![c; width * height],
         }
     }
@@ -57,6 +59,7 @@ impl ScreenBuffer {
 
             stdout.queue(PrintStyledContent(content.clone()))?;
         }
+        stdout.queue(MoveTo(self.cursor.column as u16, self.cursor.line as u16))?;
         stdout.flush()
     }
 
@@ -143,6 +146,13 @@ impl<'a> SubScreenBuffer<'a> {
 
     pub fn width(&self) -> usize {
         self.bottom_right.1 - self.top_left.1
+    }
+
+    pub fn set_cursor(&mut self, cursor: Cursor) {
+        self.screen_buffer.cursor = Cursor {
+            line: cursor.line - self.top_left.0,
+            column: cursor.column - self.top_left.1,
+        };
     }
 
     pub fn sub_screen_buffer(

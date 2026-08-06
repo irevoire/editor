@@ -94,10 +94,17 @@ pub enum Mode {
     Insert,
 }
 
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SelectionMode {
+    #[default]
+    Char,
+}
+
 pub struct Editor {
     server: ServerHandle,
     screen: Screen,
     mode: Mode,
+    selection_mode: SelectionMode,
 }
 
 pub enum ActionResult {
@@ -112,27 +119,32 @@ impl Editor {
             screen: Screen::new(server.clone(), stdout),
             mode: Mode::Normal,
             server,
+            selection_mode: SelectionMode::Char,
         }
     }
 
     /// Returns `true` if we should exit
-    pub fn process_action(&mut self, action: Action) -> ActionResult {
+    pub fn process_action(&mut self, action: Action) -> io::Result<ActionResult> {
         match action {
             Action::Quit => {
                 self.server.stop();
-                ActionResult::Exit
+                Ok(ActionResult::Exit)
             }
-            Action::FocusGained => self.screen.focus_gained(),
-            Action::FocusLost => self.screen.focus_lost(),
-            Action::Redraw => self.screen.redraw(),
+            Action::FocusGained => Ok(self.screen.focus_gained()),
+            Action::FocusLost => Ok(self.screen.focus_lost()),
+            Action::Redraw => Ok(self.screen.redraw()),
             Action::Paste(_) => todo!(),
             Action::ChangeMode(mode) => {
                 self.mode = mode;
                 self.screen.change_mode(mode)
             }
-            Action::MoveAnchor(anchor, direction) => self.screen.move_anchor(anchor, direction),
-            Action::Insert(c) => self.screen.insert(c),
-            Action::Delete(delete_direction) => self.screen.delete(delete_direction),
+            Action::MoveAnchor(anchor, direction) => {
+                Ok(self
+                    .screen
+                    .move_anchor(anchor, direction, self.selection_mode))
+            }
+            Action::Insert(c) => Ok(self.screen.insert(c)),
+            Action::Delete(delete_direction) => Ok(self.screen.delete(delete_direction)),
         }
     }
 
@@ -197,9 +209,9 @@ impl Editor {
             };
             let exit = this.process_action(action);
             match exit {
-                ActionResult::Exit => break,
-                ActionResult::Nothing => (),
-                ActionResult::Redraw => this.redraw(),
+                Err(_) | Ok(ActionResult::Exit) => break,
+                Ok(ActionResult::Nothing) => (),
+                Ok(ActionResult::Redraw) => this.redraw(),
             }
         }
         log::info!("redraw the screen");
