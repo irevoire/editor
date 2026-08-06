@@ -7,6 +7,7 @@ use crossterm::{
 use env_logger::{Builder, Env, Target};
 
 use std::{
+    cmp::Ordering,
     io::{self, BufWriter},
     panic::catch_unwind,
     sync::Arc,
@@ -65,13 +66,22 @@ fn main() {
     println!("{logs}");
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct Cursor {
     line: usize,
     column: usize,
 }
 
-#[derive(Default)]
+impl PartialOrd for Cursor {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.line.partial_cmp(&other.line) {
+            Some(Ordering::Equal) => self.column.partial_cmp(&other.column),
+            ord => ord,
+        }
+    }
+}
+
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct Selection {
     tail: Cursor,
     head: Cursor,

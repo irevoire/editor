@@ -1,24 +1,25 @@
 use std::{
     io::{self, Write},
-    ops::{self, Deref},
+    ops,
 };
 
 use crossterm::{
-    cursor::{MoveRight, MoveTo},
+    cursor::MoveTo,
     style::{ContentStyle, PrintStyledContent, StyledContent},
-    terminal::{Clear, ClearType},
-    ExecutableCommand, QueueableCommand,
+    QueueableCommand,
 };
+
+use crate::Cursor;
 
 pub struct ScreenBuffer {
     height: usize,
     width: usize,
-    buffer: Vec<StyledContent<char>>,
+    buffer: Vec<StyledContent<String>>,
 }
 
 impl ScreenBuffer {
     pub fn new(width: usize, height: usize) -> Self {
-        let c = StyledContent::new(ContentStyle::new(), ' ');
+        let c = StyledContent::new(ContentStyle::new(), " ".to_string());
         Self {
             width,
             height,
@@ -40,7 +41,7 @@ impl ScreenBuffer {
             if idx != 0 && idx % self.width() == 0 {
                 output.push('\n');
             }
-            output.push(*c.content());
+            output.push_str(c.content());
         }
         output
     }
@@ -87,7 +88,7 @@ impl<T> ops::Index<(T, T)> for ScreenBuffer
 where
     T: Into<usize>,
 {
-    type Output = StyledContent<char>;
+    type Output = StyledContent<String>;
 
     #[track_caller]
     fn index(&self, (line, column): (T, T)) -> &Self::Output {
@@ -113,6 +114,22 @@ where
     }
 }
 
+impl ops::Index<Cursor> for ScreenBuffer {
+    type Output = StyledContent<String>;
+
+    #[track_caller]
+    fn index(&self, cursor: Cursor) -> &Self::Output {
+        &self[(cursor.line, cursor.column)]
+    }
+}
+
+impl ops::IndexMut<Cursor> for ScreenBuffer {
+    #[track_caller]
+    fn index_mut(&mut self, cursor: Cursor) -> &mut Self::Output {
+        &mut self[(cursor.line, cursor.column)]
+    }
+}
+
 pub struct SubScreenBuffer<'a> {
     screen_buffer: &'a mut ScreenBuffer,
     top_left: (usize, usize),
@@ -127,13 +144,34 @@ impl<'a> SubScreenBuffer<'a> {
     pub fn width(&self) -> usize {
         self.bottom_right.1 - self.top_left.1
     }
+
+    pub fn sub_screen_buffer(
+        &'a mut self,
+        top_left: (usize, usize),
+        bottom_right: (usize, usize),
+    ) -> SubScreenBuffer<'a> {
+        assert!(top_left.0 < bottom_right.0 && top_left.1 < bottom_right.1);
+        assert!(bottom_right.0 <= self.bottom_right.0 && bottom_right.1 <= self.bottom_right.1);
+
+        let top_left = (self.top_left.0 + top_left.0, self.top_left.1 + top_left.1);
+        let bottom_right = (
+            self.bottom_right.0 + bottom_right.0,
+            self.bottom_right.1 + bottom_right.1,
+        );
+
+        SubScreenBuffer {
+            screen_buffer: self.screen_buffer,
+            top_left,
+            bottom_right,
+        }
+    }
 }
 
 impl<'a, T> ops::Index<(T, T)> for SubScreenBuffer<'a>
 where
     T: Into<usize>,
 {
-    type Output = StyledContent<char>;
+    type Output = StyledContent<String>;
 
     #[track_caller]
     fn index(&self, (line, column): (T, T)) -> &Self::Output {
@@ -161,6 +199,22 @@ where
     }
 }
 
+impl ops::Index<Cursor> for SubScreenBuffer<'_> {
+    type Output = StyledContent<String>;
+
+    #[track_caller]
+    fn index(&self, cursor: Cursor) -> &Self::Output {
+        &self[(cursor.line, cursor.column)]
+    }
+}
+
+impl ops::IndexMut<Cursor> for SubScreenBuffer<'_> {
+    #[track_caller]
+    fn index_mut(&mut self, cursor: Cursor) -> &mut Self::Output {
+        &mut self[(cursor.line, cursor.column)]
+    }
+}
+
 #[cfg(test)]
 mod test {
     use insta::assert_snapshot;
@@ -172,19 +226,20 @@ mod test {
         let mut screen = ScreenBuffer::new(10, 10);
 
         for (i, c) in "status bar".chars().enumerate() {
-            screen[(8, i)] = StyledContent::new(ContentStyle::new(), '-');
-            screen[(9, i)] = StyledContent::new(ContentStyle::new(), c);
+            screen[(8, i)] = StyledContent::new(ContentStyle::new(), "-".into());
+            screen[(9, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
         for (i, c) in "|tabs|tabs".chars().enumerate() {
-            screen[(0, i)] = StyledContent::new(ContentStyle::new(), c);
-            screen[(1, i)] = StyledContent::new(ContentStyle::new(), '-');
+            screen[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            screen[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.into());
         }
         for (i, c) in "Gutter".chars().enumerate() {
             let i = i + 2;
-            screen[(i, 0)] = StyledContent::new(ContentStyle::new(), c);
-            screen[(i, 1)] = StyledContent::new(ContentStyle::new(), '|');
+            screen[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            screen[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.into());
             for (j, c) in "Code..".chars().enumerate() {
-                screen[(i, 2 + j + (i % 3))] = StyledContent::new(ContentStyle::new(), c);
+                screen[(i, 2 + j + (i % 3))] =
+                    StyledContent::new(ContentStyle::new(), c.to_string());
             }
         }
 
@@ -208,21 +263,67 @@ mod test {
         let mut status_view = screen.sub_screen_buffer((8, 0), (9, 9));
 
         for (i, c) in "status bar".chars().enumerate() {
-            status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-');
-            status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c);
+            status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
 
         let mut tabs_view = screen.sub_screen_buffer((0, 0), (1, 9));
         for (i, c) in "|tabs|tabs".chars().enumerate() {
-            tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c);
-            tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-');
+            tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
         }
         let mut code_view = screen.sub_screen_buffer((2, 0), (8, 9));
         for (i, c) in "Gutter".chars().enumerate() {
-            code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c);
-            code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|');
+            code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
             for (j, c) in "Code..".chars().enumerate() {
-                code_view[(i, 2 + j + (i % 3))] = StyledContent::new(ContentStyle::new(), c);
+                code_view[(i, 2 + j + (i % 3))] =
+                    StyledContent::new(ContentStyle::new(), c.to_string());
+            }
+        }
+
+        assert_snapshot!(screen.display_as_text(), @r"
+        |tabs|tabs
+        ----------
+        G|Code..  
+        u| Code.. 
+        t|  Code..
+        t|Code..  
+        e| Code.. 
+        r|  Code..
+        ----------
+        status bar
+        ");
+    }
+
+    #[test]
+    fn basic_sub_sub_view_print() {
+        // we have to remake the sub_screen everytime which is bad. Ideally rust would understand
+        // when we dropped the mutable reference
+
+        let mut screen = ScreenBuffer::new(10, 10);
+        let mut sub_screen = screen.as_full_sub_screen_buffer();
+        let mut status_view = sub_screen.sub_screen_buffer((8, 0), (9, 9));
+
+        for (i, c) in "status bar".chars().enumerate() {
+            status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+        }
+        let mut sub_screen = screen.as_full_sub_screen_buffer();
+
+        let mut tabs_view = sub_screen.sub_screen_buffer((0, 0), (1, 9));
+        for (i, c) in "|tabs|tabs".chars().enumerate() {
+            tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+        }
+        let mut sub_screen = screen.as_full_sub_screen_buffer();
+        let mut code_view = sub_screen.sub_screen_buffer((2, 0), (8, 9));
+        for (i, c) in "Gutter".chars().enumerate() {
+            code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            for (j, c) in "Code..".chars().enumerate() {
+                code_view[(i, 2 + j + (i % 3))] =
+                    StyledContent::new(ContentStyle::new(), c.to_string());
             }
         }
 
@@ -244,28 +345,29 @@ mod test {
     #[should_panic]
     fn out_of_bound_on_col() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(0_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|');
+        screen[(0_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn out_of_bound_on_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10_usize, 0_usize)] = StyledContent::new(ContentStyle::new(), '|');
+        screen[(10_usize, 0_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|');
+        screen[(10_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn big_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10000_usize, 1000000_usize)] = StyledContent::new(ContentStyle::new(), '|');
+        screen[(10000_usize, 1000000_usize)] =
+            StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]

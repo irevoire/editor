@@ -58,7 +58,7 @@ impl Screen {
     }
 
     pub fn redraw(&mut self) -> ActionResult {
-        self.view.redraw(
+        self.view.draw(
             &mut self
                 .buffer
                 .sub_screen_buffer((0, 0), (self.buffer.height() - 3, self.buffer.width() - 1)),
@@ -131,7 +131,7 @@ impl Screen {
 
         for (i, c) in s.chars().enumerate() {
             self.buffer[(last_line, start_writing_at + i)] =
-                StyledContent::new(ContentStyle::default(), c);
+                StyledContent::new(ContentStyle::default(), c.to_string());
         }
         ActionResult::Redraw
     }
