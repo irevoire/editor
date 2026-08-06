@@ -67,6 +67,7 @@ impl BufferView {
                 .enumerate()
                 .take(buffer.width().saturating_sub(gutter_width as usize))
             {
+                let i = i + gutter_width as usize;
                 // If we find a \n we clear everything till the end
                 // of the line and skip to the next one
                 if c == '\n' {
@@ -75,7 +76,7 @@ impl BufferView {
                     }
                     break;
                 }
-                let i = i + gutter_width as usize;
+
                 buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c);
             }
         }
