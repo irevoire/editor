@@ -135,7 +135,7 @@ impl<'a> SubScreenBuffer<'a> {
         };
     }
 
-    pub fn sub_screen_buffer(&'a mut self, area: ScreenArea) -> SubScreenBuffer<'a> {
+    pub fn sub_screen_buffer(&mut self, area: ScreenArea) -> SubScreenBuffer<'_> {
         assert!(self.area.contains(area));
 
         let area = ScreenArea::new(
@@ -346,7 +346,6 @@ mod test {
             status_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
 
-        let mut sub_screen = screen.as_full_sub_screen_buffer();
         let mut tabs_view = sub_screen.sub_screen_buffer(ScreenArea {
             top_left: ScreenCoord { line: 0, column: 0 },
             bottom_right: ScreenCoord { line: 1, column: 9 },
@@ -361,7 +360,6 @@ mod test {
             tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
         }
 
-        let mut sub_screen = screen.as_full_sub_screen_buffer();
         let mut code_view = sub_screen.sub_screen_buffer(ScreenArea {
             top_left: ScreenCoord { line: 2, column: 0 },
             bottom_right: ScreenCoord { line: 8, column: 9 },
