@@ -9,37 +9,42 @@ use crossterm::{
     QueueableCommand,
 };
 
-use crate::Cursor;
+use crate::screen::{ScreenArea, ScreenCoord};
 
 pub struct ScreenBuffer {
-    height: usize,
-    width: usize,
-    cursor: Cursor,
+    area: ScreenArea,
+    cursor: ScreenCoord,
     buffer: Vec<StyledContent<String>>,
 }
 
 impl ScreenBuffer {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(lines: u16, columns: u16) -> Self {
         let c = StyledContent::new(ContentStyle::new(), "".to_string());
         Self {
-            width,
-            height,
-            cursor: Cursor { line: 0, column: 0 },
-            buffer: vec![c; width * height],
+            area: ScreenArea::new(
+                ScreenCoord::zero(),
+                ScreenCoord {
+                    line: lines,
+                    column: columns,
+                },
+            ),
+            cursor: ScreenCoord::zero(),
+            buffer: vec![c; (lines * columns) as usize],
         }
     }
 
-    pub fn height(&self) -> usize {
-        self.height
+    pub fn height(&self) -> u16 {
+        self.area.height()
     }
 
-    pub fn width(&self) -> usize {
-        self.width
+    pub fn width(&self) -> u16 {
+        self.area.width()
     }
 
     pub fn display_as_text(&self) -> String {
         let mut output = String::new();
         for (idx, c) in self.buffer.iter().enumerate() {
+            let idx = idx as u16;
             if idx != 0 && idx % self.width() == 0 {
                 output.push('\n');
             }
@@ -52,6 +57,7 @@ impl ScreenBuffer {
         stdout.queue(MoveTo(0, 0))?;
         let mut line = 0;
         for (idx, content) in self.buffer.iter().enumerate() {
+            let idx = idx as u16;
             if idx != 0 && idx % self.width() == 0 {
                 line += 1;
                 stdout.queue(MoveTo(0, line))?;
@@ -65,163 +71,121 @@ impl ScreenBuffer {
 
     pub fn as_full_sub_screen_buffer<'a>(&'a mut self) -> SubScreenBuffer<'a> {
         SubScreenBuffer {
-            bottom_right: (self.height(), self.width()),
+            area: ScreenArea {
+                top_left: ScreenCoord::zero(),
+                bottom_right: ScreenCoord {
+                    line: self.height(),
+                    column: self.width(),
+                },
+            },
             screen_buffer: self,
-            top_left: (0, 0),
         }
     }
 
-    pub fn sub_screen_buffer<'a>(
-        &'a mut self,
-        top_left: (usize, usize),
-        bottom_right: (usize, usize),
-    ) -> SubScreenBuffer<'a> {
-        assert!(top_left.0 < bottom_right.0 && top_left.1 < bottom_right.1);
-        assert!(bottom_right.0 < self.height && bottom_right.1 < self.width);
+    pub fn sub_screen_buffer<'a>(&'a mut self, screen_area: ScreenArea) -> SubScreenBuffer<'a> {
+        assert!(self.area.contains(screen_area));
 
         SubScreenBuffer {
             screen_buffer: self,
-            top_left,
-            bottom_right,
+            area: screen_area,
         }
     }
 }
 
-impl<T> ops::Index<(T, T)> for ScreenBuffer
-where
-    T: Into<usize>,
-{
+impl ops::Index<ScreenCoord> for ScreenBuffer {
     type Output = StyledContent<String>;
 
     #[track_caller]
-    fn index(&self, (line, column): (T, T)) -> &Self::Output {
-        let (line, column) = (line.into(), column.into());
-        if line >= self.height || column >= self.width {
-            panic!("Overflow: Tried to retrieve the character ({line},{column}) in a buffer of dimensions: ({}, {})", self.height, self.width);
+    fn index(&self, coord: ScreenCoord) -> &Self::Output {
+        if coord.line >= self.area.height() || coord.column >= self.area.width() {
+            panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
         }
-        &self.buffer[line * self.width + column]
+        &self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
 
-impl<T> ops::IndexMut<(T, T)> for ScreenBuffer
-where
-    T: Into<usize>,
-{
+impl ops::IndexMut<ScreenCoord> for ScreenBuffer {
     #[track_caller]
-    fn index_mut(&mut self, (line, column): (T, T)) -> &mut Self::Output {
-        let (line, column) = (line.into(), column.into());
-        if line >= self.height || column >= self.width {
-            panic!("Overflow: Tried to retrieve the character ({line},{column}) in a buffer of dimensions: ({}, {})", self.height, self.width);
+    fn index_mut(&mut self, coord: ScreenCoord) -> &mut Self::Output {
+        if coord.line >= self.area.height() || coord.column >= self.area.width() {
+            panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
         }
-        &mut self.buffer[line * self.width + column]
-    }
-}
-
-impl ops::Index<Cursor> for ScreenBuffer {
-    type Output = StyledContent<String>;
-
-    #[track_caller]
-    fn index(&self, cursor: Cursor) -> &Self::Output {
-        &self[(cursor.line, cursor.column)]
-    }
-}
-
-impl ops::IndexMut<Cursor> for ScreenBuffer {
-    #[track_caller]
-    fn index_mut(&mut self, cursor: Cursor) -> &mut Self::Output {
-        &mut self[(cursor.line, cursor.column)]
+        &mut self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
 
 pub struct SubScreenBuffer<'a> {
     screen_buffer: &'a mut ScreenBuffer,
-    top_left: (usize, usize),
-    bottom_right: (usize, usize),
+    area: ScreenArea,
 }
 
 impl<'a> SubScreenBuffer<'a> {
-    pub fn height(&self) -> usize {
-        self.bottom_right.0 - self.top_left.0
+    pub fn height(&self) -> u16 {
+        self.area.height()
     }
 
-    pub fn width(&self) -> usize {
-        self.bottom_right.1 - self.top_left.1
+    pub fn width(&self) -> u16 {
+        self.area.width()
     }
 
-    pub fn set_cursor(&mut self, cursor: Cursor) {
-        self.screen_buffer.cursor = Cursor {
-            line: cursor.line - self.top_left.0,
-            column: cursor.column - self.top_left.1,
+    pub fn set_cursor(&mut self, cursor: ScreenCoord) {
+        self.screen_buffer.cursor = ScreenCoord {
+            line: cursor.line - self.area.top_left.line,
+            column: cursor.column - self.area.top_left.column,
         };
     }
 
-    pub fn sub_screen_buffer(
-        &'a mut self,
-        top_left: (usize, usize),
-        bottom_right: (usize, usize),
-    ) -> SubScreenBuffer<'a> {
-        assert!(top_left.0 < bottom_right.0 && top_left.1 < bottom_right.1);
-        assert!(bottom_right.0 <= self.bottom_right.0 && bottom_right.1 <= self.bottom_right.1);
+    pub fn sub_screen_buffer(&'a mut self, area: ScreenArea) -> SubScreenBuffer<'a> {
+        assert!(self.area.contains(area));
 
-        let top_left = (self.top_left.0 + top_left.0, self.top_left.1 + top_left.1);
-        let bottom_right = (
-            self.bottom_right.0 + bottom_right.0,
-            self.bottom_right.1 + bottom_right.1,
+        let area = ScreenArea::new(
+            ScreenCoord {
+                line: self.area.top_left.line + area.top_left.line,
+                column: self.area.top_left.column + area.top_left.column,
+            },
+            ScreenCoord {
+                line: self.area.bottom_right.line + area.bottom_right.line,
+                column: self.area.bottom_right.column + area.bottom_right.column,
+            },
         );
-
         SubScreenBuffer {
             screen_buffer: self.screen_buffer,
-            top_left,
-            bottom_right,
+            area,
         }
     }
 }
 
-impl<'a, T> ops::Index<(T, T)> for SubScreenBuffer<'a>
-where
-    T: Into<usize>,
-{
+impl<'a> ops::Index<ScreenCoord> for SubScreenBuffer<'a> {
     type Output = StyledContent<String>;
 
     #[track_caller]
-    fn index(&self, (line, column): (T, T)) -> &Self::Output {
-        let (line, column) = (line.into(), column.into());
-        if line > self.bottom_right.0 || column > self.bottom_right.1 {
-            panic!("Overflow: Tried to retrieve the character ({line},{column}) in a sub buffer of dimensions: ({}, {})", self.bottom_right.0, self.bottom_right.1);
+    fn index(&self, coord: ScreenCoord) -> &Self::Output {
+        if coord.line > self.area.bottom_right.line || coord.column > self.area.bottom_right.column
+        {
+            panic!("Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})", self.area.bottom_right.line, self.area.bottom_right.column);
         }
-        let (line, column) = (line + self.top_left.0, column + self.top_left.1);
-        &self.screen_buffer[(line, column)]
+        let coord = ScreenCoord {
+            line: coord.line + self.area.top_left.line,
+            column: coord.column + self.area.top_left.column,
+        };
+
+        &self.screen_buffer[coord]
     }
 }
 
-impl<'a, T> ops::IndexMut<(T, T)> for SubScreenBuffer<'a>
-where
-    T: Into<usize>,
-{
+impl<'a> ops::IndexMut<ScreenCoord> for SubScreenBuffer<'a> {
     #[track_caller]
-    fn index_mut(&mut self, (line, column): (T, T)) -> &mut Self::Output {
-        let (line, column) = (line.into(), column.into());
-        if line > self.bottom_right.0 || column > self.bottom_right.1 {
-            panic!("Overflow: Tried to retrieve the character ({line},{column}) in a sub buffer of dimensions: ({}, {})", self.bottom_right.0, self.bottom_right.1);
+    fn index_mut(&mut self, coord: ScreenCoord) -> &mut Self::Output {
+        if coord.line > self.area.bottom_right.line || coord.column > self.area.bottom_right.column
+        {
+            panic!("Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})", self.area.bottom_right.line, self.area.bottom_right.column);
         }
-        let (line, column) = (line + self.top_left.0, column + self.top_left.1);
-        &mut self.screen_buffer[(line, column)]
-    }
-}
+        let coord = ScreenCoord {
+            line: coord.line + self.area.top_left.line,
+            column: coord.column + self.area.top_left.column,
+        };
 
-impl ops::Index<Cursor> for SubScreenBuffer<'_> {
-    type Output = StyledContent<String>;
-
-    #[track_caller]
-    fn index(&self, cursor: Cursor) -> &Self::Output {
-        &self[(cursor.line, cursor.column)]
-    }
-}
-
-impl ops::IndexMut<Cursor> for SubScreenBuffer<'_> {
-    #[track_caller]
-    fn index_mut(&mut self, cursor: Cursor) -> &mut Self::Output {
-        &mut self[(cursor.line, cursor.column)]
+        &mut self.screen_buffer[coord]
     }
 }
 
@@ -236,20 +200,44 @@ mod test {
         let mut screen = ScreenBuffer::new(10, 10);
 
         for (i, c) in "status bar".chars().enumerate() {
-            screen[(8, i)] = StyledContent::new(ContentStyle::new(), "-".into());
-            screen[(9, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            let mut coord = ScreenCoord {
+                line: 8,
+                column: i as u16,
+            };
+            screen[coord] = StyledContent::new(ContentStyle::new(), "-".into());
+            coord.line += 1;
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
         for (i, c) in "|tabs|tabs".chars().enumerate() {
-            screen[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            screen[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.into());
+            let mut coord = ScreenCoord {
+                line: 0,
+                column: i as u16,
+            };
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.line += 1;
+            screen[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
         }
         for (i, c) in "Gutter".chars().enumerate() {
             let i = i + 2;
-            screen[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            screen[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.into());
+            let mut coord = ScreenCoord {
+                line: i as u16,
+                column: 0,
+            };
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.column += 1;
+            screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
+            // shove 3 spaces for identation.
+            for _ in 0..4 {
+                coord.column += 1;
+                screen[coord] = StyledContent::new(ContentStyle::new(), ' '.into());
+            }
             for (j, c) in "Code..".chars().enumerate() {
-                screen[(i, 2 + j + (i % 3))] =
-                    StyledContent::new(ContentStyle::new(), c.to_string());
+                let coord = ScreenCoord {
+                    line: i as u16,
+                    column: (2 + j + (i % 3)) as u16,
+                };
+                println!("Showing {c} in {coord:?}");
+                screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
             }
         }
 
@@ -257,11 +245,11 @@ mod test {
         |tabs|tabs
         ----------
         G|  Code..
-        u|Code..  
-        t| Code.. 
+        u|Code..
+        t| Code..
         t|  Code..
-        e|Code..  
-        r| Code.. 
+        e|Code..
+        r| Code..
         ----------
         status bar
         ");
@@ -270,36 +258,69 @@ mod test {
     #[test]
     fn basic_sub_view_print() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let mut status_view = screen.sub_screen_buffer((8, 0), (9, 9));
+        let mut status_view = screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 8, column: 0 },
+            bottom_right: ScreenCoord { line: 9, column: 9 },
+        });
 
         for (i, c) in "status bar".chars().enumerate() {
-            status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
-            status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            let mut coord = ScreenCoord {
+                line: 0,
+                column: i as u16,
+            };
+            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            coord.line += 1;
+            status_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
 
-        let mut tabs_view = screen.sub_screen_buffer((0, 0), (1, 9));
+        let mut tabs_view = screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 0, column: 0 },
+            bottom_right: ScreenCoord { line: 1, column: 9 },
+        });
         for (i, c) in "|tabs|tabs".chars().enumerate() {
-            tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            let mut coord = ScreenCoord {
+                line: 0,
+                column: i as u16,
+            };
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.line += 1;
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
         }
-        let mut code_view = screen.sub_screen_buffer((2, 0), (8, 9));
+
+        let mut code_view = screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 2, column: 0 },
+            bottom_right: ScreenCoord { line: 8, column: 9 },
+        });
         for (i, c) in "Gutter".chars().enumerate() {
-            code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            let mut coord = ScreenCoord {
+                line: i as u16,
+                column: 0,
+            };
+            code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.column += 1;
+            code_view[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            // shove 3 spaces for identation.
+            for _ in 0..4 {
+                coord.column += 1;
+                code_view[coord] = StyledContent::new(ContentStyle::new(), ' '.into());
+            }
             for (j, c) in "Code..".chars().enumerate() {
-                code_view[(i, 2 + j + (i % 3))] =
-                    StyledContent::new(ContentStyle::new(), c.to_string());
+                let coord = ScreenCoord {
+                    line: i as u16,
+                    column: (2 + j + (i % 3)) as u16,
+                };
+                code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
             }
         }
 
         assert_snapshot!(screen.display_as_text(), @r"
         |tabs|tabs
         ----------
-        G|Code..  
-        u| Code.. 
+        G|Code..
+        u| Code..
         t|  Code..
-        t|Code..  
-        e| Code.. 
+        t|Code..
+        e| Code..
         r|  Code..
         ----------
         status bar
@@ -308,43 +329,73 @@ mod test {
 
     #[test]
     fn basic_sub_sub_view_print() {
-        // we have to remake the sub_screen everytime which is bad. Ideally rust would understand
-        // when we dropped the mutable reference
-
         let mut screen = ScreenBuffer::new(10, 10);
         let mut sub_screen = screen.as_full_sub_screen_buffer();
-        let mut status_view = sub_screen.sub_screen_buffer((8, 0), (9, 9));
+        let mut status_view = sub_screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 8, column: 0 },
+            bottom_right: ScreenCoord { line: 9, column: 9 },
+        });
 
         for (i, c) in "status bar".chars().enumerate() {
-            status_view[(0, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
-            status_view[(1, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            let mut coord = ScreenCoord {
+                line: 0,
+                column: i as u16,
+            };
+            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            coord.line += 1;
+            status_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
         }
-        let mut sub_screen = screen.as_full_sub_screen_buffer();
 
-        let mut tabs_view = sub_screen.sub_screen_buffer((0, 0), (1, 9));
-        for (i, c) in "|tabs|tabs".chars().enumerate() {
-            tabs_view[(0, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            tabs_view[(1, i)] = StyledContent::new(ContentStyle::new(), '-'.to_string());
-        }
         let mut sub_screen = screen.as_full_sub_screen_buffer();
-        let mut code_view = sub_screen.sub_screen_buffer((2, 0), (8, 9));
+        let mut tabs_view = sub_screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 0, column: 0 },
+            bottom_right: ScreenCoord { line: 1, column: 9 },
+        });
+        for (i, c) in "|tabs|tabs".chars().enumerate() {
+            let mut coord = ScreenCoord {
+                line: 0,
+                column: i as u16,
+            };
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.line += 1;
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+        }
+
+        let mut sub_screen = screen.as_full_sub_screen_buffer();
+        let mut code_view = sub_screen.sub_screen_buffer(ScreenArea {
+            top_left: ScreenCoord { line: 2, column: 0 },
+            bottom_right: ScreenCoord { line: 8, column: 9 },
+        });
         for (i, c) in "Gutter".chars().enumerate() {
-            code_view[(i, 0)] = StyledContent::new(ContentStyle::new(), c.to_string());
-            code_view[(i, 1)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            let mut coord = ScreenCoord {
+                line: i as u16,
+                column: 0,
+            };
+            code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            coord.column += 1;
+            code_view[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            // shove 3 spaces for identation.
+            for _ in 0..4 {
+                coord.column += 1;
+                code_view[coord] = StyledContent::new(ContentStyle::new(), ' '.into());
+            }
             for (j, c) in "Code..".chars().enumerate() {
-                code_view[(i, 2 + j + (i % 3))] =
-                    StyledContent::new(ContentStyle::new(), c.to_string());
+                let coord = ScreenCoord {
+                    line: i as u16,
+                    column: (2 + j + (i % 3)) as u16,
+                };
+                code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
             }
         }
 
         assert_snapshot!(screen.display_as_text(), @r"
         |tabs|tabs
         ----------
-        G|Code..  
-        u| Code.. 
+        G|Code..
+        u| Code..
         t|  Code..
-        t|Code..  
-        e| Code.. 
+        t|Code..
+        e| Code..
         r|  Code..
         ----------
         status bar
@@ -355,70 +406,121 @@ mod test {
     #[should_panic]
     fn out_of_bound_on_col() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(0_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        let coord = ScreenCoord {
+            line: 0,
+            column: 10,
+        };
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn out_of_bound_on_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10_usize, 0_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        let coord = ScreenCoord {
+            line: 10,
+            column: 0,
+        };
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10_usize, 10_usize)] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        let coord = ScreenCoord {
+            line: 10,
+            column: 10,
+        };
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn big_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        screen[(10000_usize, 1000000_usize)] =
-            StyledContent::new(ContentStyle::new(), '|'.to_string());
+        let coord = ScreenCoord {
+            line: 10000,
+            column: 10000,
+        };
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_out_of_bound_on_col() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((0, 0), (0, 10));
+        let area = ScreenArea {
+            top_left: ScreenCoord::zero(),
+            bottom_right: ScreenCoord {
+                line: 0,
+                column: 11,
+            },
+        };
+        let _sub = screen.sub_screen_buffer(area);
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_out_of_bound_on_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((0, 0), (10, 0));
+        let area = ScreenArea {
+            top_left: ScreenCoord::zero(),
+            bottom_right: ScreenCoord {
+                line: 11,
+                column: 0,
+            },
+        };
+        let _sub = screen.sub_screen_buffer(area);
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((0, 0), (10, 10));
+        let area = ScreenArea {
+            top_left: ScreenCoord::zero(),
+            bottom_right: ScreenCoord {
+                line: 11,
+                column: 11,
+            },
+        };
+        let _sub = screen.sub_screen_buffer(area);
     }
 
     #[test]
     #[should_panic]
     fn big_sub_screen_out_of_bound_on_both() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((0, 0), (10000, 1000000));
+        let area = ScreenArea {
+            top_left: ScreenCoord::zero(),
+            bottom_right: ScreenCoord {
+                line: 10000,
+                column: 10000,
+            },
+        };
+        let _sub = screen.sub_screen_buffer(area);
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_inverted_column() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((0, 2), (9, 1));
+        let area = ScreenArea::new(
+            ScreenCoord { line: 0, column: 2 },
+            ScreenCoord { line: 9, column: 1 },
+        );
+        let _sub = screen.sub_screen_buffer(area);
     }
 
     #[test]
     #[should_panic]
     fn sub_screen_inverted_line() {
         let mut screen = ScreenBuffer::new(10, 10);
-        let _sub = screen.sub_screen_buffer((2, 0), (1, 9));
+        let area = ScreenArea::new(
+            ScreenCoord { line: 2, column: 0 },
+            ScreenCoord { line: 1, column: 9 },
+        );
+        let _sub = screen.sub_screen_buffer(area);
     }
 }

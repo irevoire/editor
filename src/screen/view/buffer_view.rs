@@ -6,7 +6,7 @@ use crossterm::style::{ContentStyle, StyledContent};
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreenBuffer, view::RopeGraphemes},
+    screen::{screen_buffer::SubScreenBuffer, view::RopeGraphemes, ScreenCoord},
     server::Buffer,
     ActionResult, Cursor, Selection, SelectionMode,
 };
@@ -110,35 +110,41 @@ impl BufferView {
     /// See `set_cursor` instead.
     #[cfg(test)]
     pub fn draw_selection(&self, buffer: &mut SubScreenBuffer) {
-        use crate::Cursor;
+        use crate::{screen::ScreenCoord, Cursor};
 
         const BOX_MODIFIER: char = '\u{20DE}';
         const UNDERLINE_MODIFIER: char = '\u{0332}';
         const DOUBLE_UNDERLINE_MODIFIER: char = '\u{0333}';
 
-        let gutter_width = ((self.top_line + buffer.height()) as f32).log10().ceil() as usize + 2;
+        let gutter_width = ((self.top_line + buffer.height() as usize) as f32)
+            .log10()
+            .ceil() as usize
+            + 2;
 
-        let mut update_with = |cursor: Cursor, modifier: char| {
-            buffer[cursor] = StyledContent::new(
-                *buffer[cursor].style(),
-                format!("{}{}", buffer[cursor].content(), modifier),
+        let mut update_with = |coord: ScreenCoord, modifier: char| {
+            buffer[coord] = StyledContent::new(
+                *buffer[coord].style(),
+                format!("{}{}", buffer[coord].content(), modifier),
             )
         };
 
         let head_cursor = Cursor {
-            line: self.selection.head.line - self.top_line,
+            line: self.selection.head.line,
             column: self.selection.head.column + gutter_width,
         };
-        update_with(head_cursor, BOX_MODIFIER);
+        update_with(head_cursor.to_screen_coord(self.top_line), BOX_MODIFIER);
 
         let tail_cursor = Cursor {
-            line: self.selection.tail.line - self.top_line,
+            line: self.selection.tail.line,
             column: self.selection.tail.column + gutter_width,
         };
         if head_cursor == tail_cursor {
             return;
         }
-        update_with(tail_cursor, DOUBLE_UNDERLINE_MODIFIER);
+        update_with(
+            tail_cursor.to_screen_coord(self.top_line),
+            DOUBLE_UNDERLINE_MODIFIER,
+        );
 
         let (start, end) = if head_cursor < tail_cursor {
             (head_cursor, tail_cursor)
@@ -152,7 +158,8 @@ impl BufferView {
                     Cursor {
                         line: start.line,
                         column: col,
-                    },
+                    }
+                    .to_screen_coord(self.top_line),
                     UNDERLINE_MODIFIER,
                 );
             }
@@ -172,29 +179,36 @@ impl BufferView {
         let rope = self.buffer.rope.blocking_read();
 
         // The number of chars needed for the raw number + 2 for the `| `
-        let gutter_width = ((self.top_line + buffer.height()) as f32).log10().ceil() as usize + 2;
+        let gutter_width = ((self.top_line + buffer.height() as usize) as f32)
+            .log10()
+            .ceil() as usize
+            + 2;
         let screen_cursor = Cursor {
-            line: self.selection.head.line - self.top_line,
+            line: self.selection.head.line,
             column: self.selection.head.column + gutter_width,
         };
-        buffer.set_cursor(screen_cursor);
+        buffer.set_cursor(screen_cursor.to_screen_coord(self.top_line));
 
         for (line_idx, line) in rope
             .lines_at(self.top_line)
             .enumerate()
-            .take(buffer.height())
+            .take(buffer.height() as usize)
         {
             let gutter = format!(
                 "{:width$}| ",
                 self.top_line + line_idx,
                 width = (gutter_width - 2) as usize
             );
-            for (i, c) in gutter.chars().enumerate().take(buffer.width()) {
-                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), c.to_string());
+            for (i, c) in gutter.chars().enumerate().take(buffer.width() as usize) {
+                let coord = ScreenCoord {
+                    line: line_idx as u16,
+                    column: i as u16,
+                };
+                buffer[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
             }
             for (i, g) in RopeGraphemes::new(&line)
                 .enumerate()
-                .take(buffer.width().saturating_sub(gutter_width as usize))
+                .take(buffer.width().saturating_sub(gutter_width as u16) as usize)
             {
                 let i = i + gutter_width as usize;
                 let g = g.to_string();
@@ -202,14 +216,22 @@ impl BufferView {
                 // If we find a \n we clear everything till the end
                 // of the line and skip to the next one
                 if g.chars().next() == Some('\n') {
-                    for i in i..buffer.width() {
-                        buffer[(line_idx, i)] =
-                            StyledContent::new(ContentStyle::new(), ' '.to_string());
+                    for i in i as u16..buffer.width() {
+                        let coord = ScreenCoord {
+                            line: line_idx as u16,
+                            column: i as u16,
+                        };
+                        buffer[coord] = StyledContent::new(ContentStyle::new(), ' '.to_string());
                     }
                     break;
                 }
 
-                buffer[(line_idx, i)] = StyledContent::new(ContentStyle::new(), g.to_string());
+                let coord = ScreenCoord {
+                    line: line_idx as u16,
+                    column: i as u16,
+                };
+
+                buffer[coord] = StyledContent::new(ContentStyle::new(), g.to_string());
             }
         }
     }
@@ -249,7 +271,7 @@ pub mod test {
                 rope: RwLock::new(Rope::from_str(std::include_str!("test_document.txt"))),
             }),
         };
-        let buffer = ScreenBuffer::new(width, height);
+        let buffer = ScreenBuffer::new(height as u16, width as u16);
         (buffer, view)
     }
 

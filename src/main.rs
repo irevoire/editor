@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreenBuffer, Screen},
+    screen::{screen_buffer::SubScreenBuffer, Screen, ScreenCoord},
     server::{Buffer, Server, ServerHandle},
 };
 
@@ -70,6 +70,20 @@ fn main() {
 pub struct Cursor {
     line: usize,
     column: usize,
+}
+
+impl Cursor {
+    /// Convert a cursor pointing at a specific position in a file / buffer
+    /// into a screen coordinate.
+    /// The line offset is the line number that represents the top of the screen.
+    #[track_caller]
+    pub fn to_screen_coord(self, line_offset: usize) -> ScreenCoord {
+        assert!(line_offset <= self.line);
+        ScreenCoord {
+            line: (self.line - line_offset) as u16,
+            column: self.column as u16,
+        }
+    }
 }
 
 impl PartialOrd for Cursor {
