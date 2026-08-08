@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreenBuffer, Screen, ScreenCoord},
+    screen::{screen_buffer::SubScreen, Screen, ScreenCoord},
     server::{Buffer, Server, ServerHandle},
 };
 

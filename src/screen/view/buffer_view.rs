@@ -6,7 +6,7 @@ use crossterm::style::{ContentStyle, StyledContent};
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreenBuffer, view::RopeGraphemes, ScreenCoord},
+    screen::{screen_buffer::SubScreen, view::RopeGraphemes, ScreenCoord},
     server::Buffer,
     ActionResult, Cursor, Selection, SelectionMode,
 };
@@ -15,6 +15,7 @@ pub struct BufferView {
     pub width: usize,
     pub height: usize,
     pub top_line: usize,
+    pub active: bool,
     pub selection: Selection,
     pub buffer: Arc<Buffer>,
 }
@@ -109,7 +110,7 @@ impl BufferView {
     /// instead of drawing an actual cursor on the screen.
     /// See `set_cursor` instead.
     #[cfg(test)]
-    pub fn draw_selection(&self, buffer: &mut SubScreenBuffer) {
+    pub fn draw_selection(&self, buffer: &mut SubScreen) {
         use crate::{screen::ScreenCoord, Cursor};
 
         const BOX_MODIFIER: char = '\u{20DE}';
@@ -170,12 +171,12 @@ impl BufferView {
 
     #[cfg(test)]
     pub fn draw_and_display(&self, buffer: &mut ScreenBuffer) -> String {
-        self.draw(&mut buffer.as_full_sub_screen_buffer());
-        self.draw_selection(&mut buffer.as_full_sub_screen_buffer());
+        self.draw(&mut buffer.as_sub_screen());
+        self.draw_selection(&mut buffer.as_sub_screen());
         buffer.display_as_text()
     }
 
-    pub fn draw(&self, buffer: &mut SubScreenBuffer) {
+    pub fn draw(&self, buffer: &mut SubScreen) {
         let rope = self.buffer.rope.blocking_read();
 
         // The number of chars needed for the raw number + 2 for the `| `
@@ -183,11 +184,16 @@ impl BufferView {
             .log10()
             .ceil() as usize
             + 2;
-        let screen_cursor = Cursor {
-            line: self.selection.head.line,
-            column: self.selection.head.column + gutter_width,
-        };
-        buffer.set_cursor(screen_cursor.to_screen_coord(self.top_line));
+        if self.active {
+            let screen_cursor = Cursor {
+                line: self.selection.head.line,
+                column: self.selection.head.column + gutter_width,
+            };
+            // SAFE: Because we know there can only be one active screen at once
+            unsafe {
+                buffer.set_cursor(screen_cursor.to_screen_coord(self.top_line));
+            }
+        }
 
         for (line_idx, line) in rope
             .lines_at(self.top_line)
@@ -270,6 +276,7 @@ pub mod test {
                 path: None,
                 rope: RwLock::new(Rope::from_str(std::include_str!("test_document.txt"))),
             }),
+            active: true,
         };
         let buffer = ScreenBuffer::new(height as u16, width as u16);
         (buffer, view)
