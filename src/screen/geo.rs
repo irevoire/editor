@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, Hash)]
 pub struct ScreenCoord {
     pub line: u16,
     pub column: u16,
@@ -149,11 +149,16 @@ impl ScreenArea {
             column: other.column + self.top_left.column,
         }
     }
+
+    pub fn iter(self) -> impl Iterator<Item = ScreenCoord> + Clone {
+        (0..self.height())
+            .flat_map(move |line| (0..self.width()).map(move |column| ScreenCoord { line, column }))
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use insta::assert_debug_snapshot;
+    use insta::{assert_debug_snapshot, assert_snapshot};
 
     use crate::screen::geo::{ScreenArea, ScreenCoord};
 
@@ -640,5 +645,30 @@ mod test {
             },
         );
         area.split_after_internal_line(10);
+    }
+
+    #[test]
+    fn test_iter() {
+        let area = ScreenArea::new(
+            ScreenCoord {
+                line: 10,
+                column: 20,
+            },
+            ScreenCoord {
+                line: 20,
+                column: 40,
+            },
+        );
+        let iter = area.iter();
+        assert_snapshot!(iter.clone().count(), @"231");
+        let mut set = std::collections::HashSet::new();
+        for coord in iter {
+            if !set.insert(coord) {
+                panic!("Iteration returned the same coord twice: {coord:?}");
+            }
+            if !area.contains_internal_coord(coord) {
+                panic!("Iteration returned a coordinate that's not part of the area: {coord:?}");
+            }
+        }
     }
 }
