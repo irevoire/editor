@@ -1,17 +1,21 @@
 use crossterm::{
     cursor::SetCursorStyle,
-    style::{ContentStyle, StyledContent},
+    style::{ContentStyle, StyledContent, Stylize},
     ExecutableCommand, QueueableCommand,
 };
 use std::io;
 
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::ScreenBuffer, view::buffer_view::BufferView},
+    screen::{
+        screen_buffer::{ScreenBuffer, SubScreen},
+        view::buffer_view::BufferView,
+    },
     server::ServerHandle,
-    ActionResult, Selection, SelectionMode,
+    ActionResult, GlobalContext, Selection, SelectionMode,
 };
 
+pub mod components;
 mod geo;
 pub mod screen_buffer;
 pub mod view;
@@ -61,15 +65,16 @@ impl Screen {
         ActionResult::Nothing
     }
 
-    pub fn redraw(&mut self) -> ActionResult {
+    pub fn draw(&mut self, ctx: &GlobalContext) -> ActionResult {
         let mut sub_screen = self.buffer.as_sub_screen();
-        self.view.draw(&mut sub_screen.sub_screen(ScreenArea::new(
-            ScreenCoord::zero(),
-            ScreenCoord {
-                line: sub_screen.height() - 3,
-                column: sub_screen.width() - 1,
-            },
-        )));
+
+        let (mut tab_view, mut rem) = sub_screen.split_after_line(0);
+        let (mut code, status) = rem.split_after_line(rem.height() - 3);
+        ctx.status_bar.draw(status);
+
+        self.view.draw_tab(&mut tab_view);
+        self.view.draw_code(&mut code);
+
         self.buffer.display_on_screen(&mut self.stdout).unwrap();
         ActionResult::Nothing
     }
@@ -91,24 +96,31 @@ impl Screen {
         self.view.delete(delete_direction)
     }
 
+    fn draw_status(&self, buffer: &mut SubScreen, ctx: &GlobalContext) {
+        let s = format!("{:?}", ctx.mode);
+        buffer.fill(StyledContent::new(
+            ContentStyle::new().on_dark_grey(),
+            " ".to_string(),
+        ));
+        let middle = buffer.width() / 2;
+        let start_writing_at = middle - (s.len() as u16 / 2);
+
+        for (i, c) in s.chars().enumerate() {
+            let coord = ScreenCoord {
+                line: 0,
+                column: start_writing_at + i as u16,
+            };
+            buffer[coord] =
+                StyledContent::new(ContentStyle::new().white().on_dark_grey(), c.to_string());
+        }
+    }
+
     pub fn change_mode(&mut self, mode: crate::Mode) -> io::Result<ActionResult> {
         let cursor_shape = match mode {
             crate::Mode::Normal => SetCursorStyle::DefaultUserShape,
             crate::Mode::Insert => SetCursorStyle::BlinkingBar,
         };
         self.stdout.queue(cursor_shape)?;
-        let s = format!("{mode:?}");
-        let middle = self.buffer.width() / 2;
-        let start_writing_at = middle - s.len() as u16 / 2;
-        let last_line = self.buffer.height() - 1;
-
-        for (i, c) in s.chars().enumerate() {
-            let coord = ScreenCoord {
-                line: last_line,
-                column: start_writing_at + i as u16,
-            };
-            self.buffer[coord] = StyledContent::new(ContentStyle::default(), c.to_string());
-        }
         Ok(ActionResult::Redraw)
     }
 }

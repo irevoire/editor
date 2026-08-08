@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{Screen, ScreenCoord},
+    screen::{components::StatusBar, Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
 
@@ -115,8 +115,14 @@ pub enum SelectionMode {
 pub struct Editor {
     server: ServerHandle,
     screen: Screen,
+    context: GlobalContext,
+}
+
+#[derive(Default)]
+pub struct GlobalContext {
     mode: Mode,
     selection_mode: SelectionMode,
+    status_bar: StatusBar,
 }
 
 pub enum ActionResult {
@@ -129,9 +135,8 @@ impl Editor {
     pub fn new(server: ServerHandle, stdout: io::Stdout) -> Self {
         Self {
             screen: Screen::new(server.clone(), stdout),
-            mode: Mode::Normal,
             server,
-            selection_mode: SelectionMode::Char,
+            context: Default::default(),
         }
     }
 
@@ -144,16 +149,16 @@ impl Editor {
             }
             Action::FocusGained => Ok(self.screen.focus_gained()),
             Action::FocusLost => Ok(self.screen.focus_lost()),
-            Action::Redraw => Ok(self.screen.redraw()),
+            Action::Redraw => Ok(self.screen.draw(&self.context)),
             Action::Paste(_) => todo!(),
             Action::ChangeMode(mode) => {
-                self.mode = mode;
+                self.context.mode = mode;
                 self.screen.change_mode(mode)
             }
             Action::MoveAnchor(anchor, direction) => {
                 Ok(self
                     .screen
-                    .move_anchor(anchor, direction, self.selection_mode))
+                    .move_anchor(anchor, direction, self.context.selection_mode))
             }
             Action::Insert(c) => Ok(self.screen.insert(c)),
             Action::Delete(delete_direction) => Ok(self.screen.delete(delete_direction)),
@@ -161,7 +166,7 @@ impl Editor {
     }
 
     pub fn redraw(&mut self) {
-        self.screen.redraw();
+        self.screen.draw(&self.context);
     }
 
     fn event_to_action(&self, event: Event) -> Option<Action> {
@@ -172,7 +177,7 @@ impl Editor {
             Event::Key(key_event) => match key_event.code {
                 KeyCode::Backspace => Some(Action::Delete(DeleteDirection::Left)),
                 KeyCode::Delete => Some(Action::Delete(DeleteDirection::Right)),
-                KeyCode::Enter if self.mode == Mode::Insert => Some(Action::Insert('\n')),
+                KeyCode::Enter if self.context.mode == Mode::Insert => Some(Action::Insert('\n')),
                 KeyCode::Enter => None,
                 KeyCode::Left => Some(Action::MoveAnchor(Anchor::Head, Direction::Left)),
                 KeyCode::Right => Some(Action::MoveAnchor(Anchor::Head, Direction::Right)),
@@ -182,12 +187,12 @@ impl Editor {
                 KeyCode::End => Some(Action::MoveAnchor(Anchor::Head, Direction::EndOfLine)),
                 KeyCode::PageUp => Some(Action::MoveAnchor(Anchor::Head, Direction::PageUp)),
                 KeyCode::PageDown => Some(Action::MoveAnchor(Anchor::Head, Direction::PageDown)),
-                KeyCode::Tab if self.mode == Mode::Insert => Some(Action::Insert('\t')),
+                KeyCode::Tab if self.context.mode == Mode::Insert => Some(Action::Insert('\t')),
                 KeyCode::Tab => None,
                 KeyCode::BackTab => todo!(),
                 KeyCode::Insert => Some(Action::ChangeMode(Mode::Insert)),
                 KeyCode::F(_) => None,
-                KeyCode::Char(c) if self.mode == Mode::Insert => Some(Action::Insert(c)),
+                KeyCode::Char(c) if self.context.mode == Mode::Insert => Some(Action::Insert(c)),
                 KeyCode::Char(c) => match c {
                     'q' => Some(Action::Quit),
                     'i' => Some(Action::ChangeMode(Mode::Insert)),

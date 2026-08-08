@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crossterm::style::{ContentStyle, StyledContent};
+use crossterm::style::{ContentStyle, StyledContent, Stylize};
 
 #[cfg(test)]
 use crate::screen::screen_buffer::ScreenBuffer;
@@ -171,12 +171,12 @@ impl BufferView {
 
     #[cfg(test)]
     pub fn draw_and_display(&self, buffer: &mut ScreenBuffer) -> String {
-        self.draw(&mut buffer.as_sub_screen());
+        self.draw_code(&mut buffer.as_sub_screen());
         self.draw_selection(&mut buffer.as_sub_screen());
         buffer.display_as_text()
     }
 
-    pub fn draw(&self, buffer: &mut SubScreen) {
+    pub fn draw_code(&self, buffer: &mut SubScreen) {
         let rope = self.buffer.rope.blocking_read();
 
         // The number of chars needed for the raw number + 2 for the `| `
@@ -239,6 +239,23 @@ impl BufferView {
 
                 buffer[coord] = StyledContent::new(ContentStyle::new(), g.to_string());
             }
+        }
+    }
+
+    pub fn draw_tab(&self, tab_view: &mut SubScreen<'_>) {
+        tab_view.fill(StyledContent::new(
+            ContentStyle::new().on_white(),
+            " ".to_string(),
+        ));
+        for (idx, c) in "*scratch*"
+            .chars()
+            .take(tab_view.width() as usize)
+            .enumerate()
+        {
+            tab_view[ScreenCoord {
+                line: 0,
+                column: idx as u16,
+            }] = StyledContent::new(ContentStyle::new().white().on_dark_grey(), c.to_string());
         }
     }
 }

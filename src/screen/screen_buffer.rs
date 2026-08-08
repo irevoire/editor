@@ -102,7 +102,6 @@ impl ops::Index<ScreenCoord> for ScreenBuffer {
         if coord.line >= self.area.height() || coord.column >= self.area.width() {
             panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
         }
-        println!("Accessing {coord:?} in {:?}", self.area);
         &self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
@@ -113,7 +112,6 @@ impl ops::IndexMut<ScreenCoord> for ScreenBuffer {
         if coord.line >= self.area.height() || coord.column >= self.area.width() {
             panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
         }
-        println!("Accessing {coord:?} in {:?}", self.area);
         &mut self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
@@ -148,7 +146,7 @@ impl<'a> SubScreen<'a> {
     /// Split the screen vertically right after the specified column.
     /// Return the left half and the right half. There is nothing in between.
     /// Panics if the column is larger than the `width` of the screen.
-    pub fn split_after_col(&mut self, column: u16) -> (SubScreen<'_>, SubScreen<'_>) {
+    pub fn split_after_col<'b>(&mut self, column: u16) -> (SubScreen<'b>, SubScreen<'b>) {
         assert!(self.area.width() > column);
 
         let (left, right) = self.area.split_after_internal_column(column);
@@ -202,6 +200,12 @@ impl<'a> SubScreen<'a> {
             screen_buffer: self.screen_buffer,
             area: self.area.shrink_to_internal_area(area),
             _marker: PhantomData,
+        }
+    }
+
+    pub fn fill(&mut self, content: StyledContent<String>) {
+        for coord in self.area.iter() {
+            self[coord] = content.clone();
         }
     }
 }
