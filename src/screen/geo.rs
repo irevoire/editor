@@ -162,6 +162,19 @@ mod test {
 
     use crate::screen::geo::{ScreenArea, ScreenCoord};
 
+    fn test_area() -> ScreenArea {
+        ScreenArea::new(
+            ScreenCoord {
+                line: 10,
+                column: 20,
+            },
+            ScreenCoord {
+                line: 20,
+                column: 40,
+            },
+        )
+    }
+
     #[test]
     fn test_area_size() {
         let area = ScreenArea::new(
@@ -174,32 +187,14 @@ mod test {
         assert_eq!(area.width(), 41);
         assert_eq!(area.height(), 21);
 
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         assert_eq!(area.width(), 21);
         assert_eq!(area.height(), 11);
     }
 
     #[test]
     fn test_contains_coords() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         // The point is relative to the start of the area so it's inside
         // even though the area starts at 10,20
         let ret = area.contains_internal_coord(ScreenCoord { line: 0, column: 0 });
@@ -221,16 +216,7 @@ mod test {
 
     #[test]
     fn test_doesnt_contains_coords() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let ret = area.contains_internal_coord(ScreenCoord {
             line: 11,
             column: 20,
@@ -255,16 +241,7 @@ mod test {
 
     #[test]
     fn test_contains_area() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         // The point is relative to the start of the area so it's inside
         // even though the area starts at 10,20
         let ret = area.contains_internal_area(ScreenArea::new(
@@ -300,16 +277,7 @@ mod test {
 
     #[test]
     fn test_doesnt_contains_area() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let ret = area.contains_internal_area(ScreenArea::new(
             ScreenCoord::zero(),
             ScreenCoord {
@@ -367,16 +335,7 @@ mod test {
 
     #[test]
     fn test_translate_internal_coords() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let coord = area.translate_internal_coord(ScreenCoord { line: 0, column: 0 });
         assert_eq!(
             coord,
@@ -412,16 +371,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_translate_internal_coords_oob_line() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let coord = area.translate_internal_coord(ScreenCoord {
             line: 11,
             column: 0,
@@ -438,16 +388,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_translate_internal_coords_oob_column() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let coord = area.translate_internal_coord(ScreenCoord {
             line: 0,
             column: 21,
@@ -464,16 +405,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_translate_internal_coords_oob_both() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let coord = area.translate_internal_coord(ScreenCoord {
             line: 11,
             column: 21,
@@ -489,16 +421,7 @@ mod test {
 
     #[test]
     fn test_split_on_internal_column() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let (left, right) = area.split_after_internal_column(0);
         assert_debug_snapshot!(left, @r"
         ScreenArea {
@@ -554,31 +477,13 @@ mod test {
     #[test]
     #[should_panic]
     fn test_split_on_internal_column_oob() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         area.split_after_internal_column(20);
     }
 
     #[test]
     fn test_split_on_internal_line() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let (top, bottom) = area.split_after_internal_line(0);
         assert_debug_snapshot!(top, @r"
         ScreenArea {
@@ -634,31 +539,13 @@ mod test {
     #[test]
     #[should_panic]
     fn test_split_on_internal_line_oob() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         area.split_after_internal_line(10);
     }
 
     #[test]
     fn test_iter() {
-        let area = ScreenArea::new(
-            ScreenCoord {
-                line: 10,
-                column: 20,
-            },
-            ScreenCoord {
-                line: 20,
-                column: 40,
-            },
-        );
+        let area = test_area();
         let iter = area.iter();
         assert_snapshot!(iter.clone().count(), @"231");
         let mut set = std::collections::HashSet::new();
