@@ -1,17 +1,9 @@
-use std::{
-    path::PathBuf,
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc,
-    },
+use std::sync::{
+    mpsc::{self, Receiver, Sender},
+    Arc,
 };
 
-use ropey::Rope;
-
-use crate::{
-    action::Action,
-    server::command::{Command, GlobalCommand, GlobalQuery, Query},
-};
+use crate::server::command::{Command, GlobalCommand, GlobalQuery, Query};
 
 mod buffer;
 mod command;

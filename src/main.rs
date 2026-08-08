@@ -1,6 +1,5 @@
 use crossterm::{
     event::{Event, KeyCode},
-    style::{ContentStyle, StyledContent},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -10,13 +9,12 @@ use std::{
     cmp::Ordering,
     io::{self, BufWriter},
     panic::catch_unwind,
-    sync::Arc,
 };
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreen, Screen, ScreenCoord},
-    server::{Buffer, Server, ServerHandle},
+    screen::{Screen, ScreenCoord},
+    server::{Server, ServerHandle},
 };
 
 mod action;

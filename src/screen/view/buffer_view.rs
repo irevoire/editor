@@ -1,4 +1,4 @@
-use std::{io::Stdout, sync::Arc};
+use std::sync::Arc;
 
 use crossterm::style::{ContentStyle, StyledContent};
 
