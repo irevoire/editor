@@ -19,6 +19,7 @@ use crate::screen::{ScreenArea, ScreenCoord};
 /// to duplicate it.
 /// As long as we don't try to edit the same cell twice at the same time, it should
 /// also be fairly easy to share this buffer between multiple screens.
+#[derive(Debug)]
 pub struct ScreenBuffer {
     area: ScreenArea,
     cursor: ScreenCoord,
@@ -57,7 +58,11 @@ impl ScreenBuffer {
             if idx != 0 && idx % self.width() == 0 {
                 output.push('\n');
             }
-            output.push_str(c.content());
+            if c.content().is_empty() {
+                output.push(' ');
+            } else {
+                output.push_str(c.content());
+            }
         }
         output
     }
@@ -292,11 +297,11 @@ mod test {
         |tabs|tabs
         ----------
         G|  Code..
-        u|Code..
-        t| Code..
+        u|Code..  
+        t| Code.. 
         t|  Code..
-        e|Code..
-        r| Code..
+        e|Code..  
+        r| Code.. 
         ----------
         status bar
         ");
@@ -364,11 +369,11 @@ mod test {
         assert_snapshot!(screen.display_as_text(), @r"
         |tabs|tabs
         ----------
-        G|Code..
-        u| Code..
+        G|Code..  
+        u| Code.. 
         t|  Code..
-        t|Code..
-        e| Code..
+        t|Code..  
+        e| Code.. 
         r|  Code..
         ----------
         status bar
@@ -449,12 +454,12 @@ mod test {
         assert_snapshot!(screen.display_as_text(), @r"
         |tabs|tabs
         ----------
-        G|Code..
-        u|Code..
-        t| Code..
-        t|Code..
-        e|Code..
-        r| Code..
+        G|Code..  
+        u| Code.. 
+        t|  Code..
+        t|Code..  
+        e| Code.. 
+        r|  Code..
         ----------
         status bar
         ");
