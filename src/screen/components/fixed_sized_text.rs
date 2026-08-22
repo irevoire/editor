@@ -16,6 +16,7 @@ pub enum FixedSizeTextOverflow {
 
 /// Lets you display text in a fixed size area on the terminal.
 /// If you need to change the size of the area, call the resize method.
+#[derive(Debug)]
 pub struct FixedSizeText {
     /// The number of terminal cell available to display the text
     size: usize,
@@ -98,6 +99,7 @@ impl FixedSizeText {
         if self.displayed_at == Timestamp::MIN {
             self.displayed_at = now;
         } else if now.duration_since(self.displayed_at).as_secs_f32() >= 0.5 {
+            self.displayed_at = now;
             self.displaying_from = self.displaying_from + 1 % self.graphemes.len();
             self.displaying_to = self.displaying_to + 1 % self.graphemes.len();
         }
@@ -155,25 +157,33 @@ mod test {
 
     #[test]
     fn overflow_crop_fixed_sized_text() {
-        let mut screen = ScreenBuffer::new(1, 10);
+        let mut screen = ScreenBuffer::new(1, 15);
 
         let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropRight);
         text.set_text(String::from("Hello World!"));
         text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
+        text.resize(11);
+        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"Hello World");
 
         text.set_overflow(FixedSizeTextOverflow::CropLeft);
         text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
-        assert_snapshot!(screen.display_as_text(), @"llo World!");
+        assert_snapshot!(screen.display_as_text(), @"ello World!");
+        text.resize(11);
+        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"ello World!");
     }
 
     #[test]
     fn overflow_animate_fixed_sized_text() {
-        let mut screen = ScreenBuffer::new(1, 10);
+        let mut screen = ScreenBuffer::new(1, 15);
 
         let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::Animate);
         text.set_text(String::from("Hello World!"));
         let mut now = Timestamp::new(0, 0).unwrap();
+        text.draw(now, screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"Hello Worl");
         text.draw(now, screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
 
@@ -197,18 +207,25 @@ mod test {
             ret.push('\n');
         }
         assert_snapshot!(ret, @r"
-        lo World! 
-        o World! H
-         World! He
-        World! Hel
-        orld! Hell
-        rld! Hello
-        ld! Hello 
-        d! Hello W
-        ! Hello Wo
-         Hello Wor
-        Hello Worl
+        lo World!      
+        o World! H     
+         World! He     
+        World! Hel     
+        orld! Hell     
+        rld! Hello     
+        ld! Hello      
+        d! Hello W     
+        ! Hello Wo     
+         Hello Wor     
+        Hello Worl     
         ello World
         ");
+
+        // By adding one char we could either show the h or the !. But we should
+        // reset the animation and start again from the beginning.
+        text.resize(11);
+        dbg!(&text);
+        text.draw(now, screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"Hello World");
     }
 }
