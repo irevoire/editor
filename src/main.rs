@@ -1,7 +1,7 @@
 use crossterm::{
-    event::{Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{Event, KeyCode},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use env_logger::{Builder, Env, Target};
 
@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{components::StatusBar, Screen, ScreenCoord},
+    screen::{Screen, ScreenCoord, components::StatusBar},
     server::{Server, ServerHandle},
 };
 

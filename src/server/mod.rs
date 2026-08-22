@@ -1,6 +1,6 @@
 use std::sync::{
-    mpsc::{self, Receiver, Sender},
     Arc,
+    mpsc::{self, Receiver, Sender},
 };
 
 use crate::server::command::{Command, GlobalCommand, GlobalQuery, Query};

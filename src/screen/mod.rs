@@ -8,7 +8,7 @@ use std::io;
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
     screen::{
-        screen_buffer::{ScreenBuffer, SubScreen},
+        screen_buffer::{Grapheme, ScreenBuffer, SubScreen},
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
@@ -100,7 +100,7 @@ impl Screen {
         let s = format!("{:?}", ctx.mode);
         buffer.fill(StyledContent::new(
             ContentStyle::new().on_dark_grey(),
-            " ".to_string(),
+            Grapheme::space(),
         ));
         let middle = buffer.width() / 2;
         let start_writing_at = middle - (s.len() as u16 / 2);
@@ -110,8 +110,10 @@ impl Screen {
                 line: 0,
                 column: start_writing_at + i as u16,
             };
-            buffer[coord] =
-                StyledContent::new(ContentStyle::new().white().on_dark_grey(), c.to_string());
+            buffer[coord] = StyledContent::new(
+                ContentStyle::new().white().on_dark_grey(),
+                Grapheme::from(c),
+            );
         }
     }
 

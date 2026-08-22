@@ -6,7 +6,11 @@ use crossterm::style::{ContentStyle, StyledContent, Stylize};
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
-    screen::{screen_buffer::SubScreen, view::RopeGraphemes, ScreenCoord},
+    screen::{
+        screen_buffer::{Grapheme, SubScreen},
+        view::RopeGraphemes,
+        ScreenCoord,
+    },
     server::Buffer,
     ActionResult, Cursor, Selection, SelectionMode,
 };
@@ -93,7 +97,7 @@ impl BufferView {
             DeleteDirection::Left
                 if self.selection.head.column == 0 && self.selection.head.line == 0 =>
             {
-                return ActionResult::Nothing
+                return ActionResult::Nothing;
             }
             DeleteDirection::Left => {
                 self.selection.head.column = self.selection.head.column.saturating_sub(1);
@@ -123,9 +127,11 @@ impl BufferView {
             + 2;
 
         let mut update_with = |coord: ScreenCoord, modifier: char| {
+            use crate::screen::screen_buffer::Grapheme;
+
             buffer[coord] = StyledContent::new(
                 *buffer[coord].style(),
-                format!("{}{}", buffer[coord].content(), modifier),
+                Grapheme::from(format!("{}{}", buffer[coord].content(), modifier)),
             )
         };
 
@@ -210,7 +216,7 @@ impl BufferView {
                     line: line_idx as u16,
                     column: i as u16,
                 };
-                buffer[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+                buffer[coord] = StyledContent::new(ContentStyle::new(), c.into());
             }
             for (i, g) in RopeGraphemes::new(&line)
                 .enumerate()
@@ -227,7 +233,7 @@ impl BufferView {
                             line: line_idx as u16,
                             column: i as u16,
                         };
-                        buffer[coord] = StyledContent::new(ContentStyle::new(), ' '.to_string());
+                        buffer[coord] = StyledContent::new(ContentStyle::new(), Grapheme::space());
                     }
                     break;
                 }
@@ -237,7 +243,7 @@ impl BufferView {
                     column: i as u16,
                 };
 
-                buffer[coord] = StyledContent::new(ContentStyle::new(), g.to_string());
+                buffer[coord] = StyledContent::new(ContentStyle::new(), g.into());
             }
         }
     }
@@ -245,7 +251,7 @@ impl BufferView {
     pub fn draw_tab(&self, tab_view: &mut SubScreen<'_>) {
         tab_view.fill(StyledContent::new(
             ContentStyle::new().on_white(),
-            " ".to_string(),
+            Grapheme::space(),
         ));
         for (idx, c) in "*scratch*"
             .chars()
@@ -255,7 +261,7 @@ impl BufferView {
             tab_view[ScreenCoord {
                 line: 0,
                 column: idx as u16,
-            }] = StyledContent::new(ContentStyle::new().white().on_dark_grey(), c.to_string());
+            }] = StyledContent::new(ContentStyle::new().white().on_dark_grey(), c.into());
         }
     }
 }

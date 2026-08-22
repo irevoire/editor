@@ -1,7 +1,8 @@
 use std::{
+    fmt,
     io::{self, Write},
     marker::PhantomData,
-    ops,
+    ops::{self, Deref},
 };
 
 use crossterm::{
@@ -9,8 +10,120 @@ use crossterm::{
     style::{ContentStyle, PrintStyledContent, StyledContent},
     QueueableCommand,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::screen::{ScreenArea, ScreenCoord};
+
+/// A grapheme is a string that can be represented on a single terminal cell.
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Grapheme(String);
+
+impl Grapheme {
+    pub fn new() -> Grapheme {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    /// Return a single space " " as a grapheme.
+    pub fn space() -> Grapheme {
+        Grapheme(String::from(" "))
+    }
+
+    /// Returns `true` if the char was pushed to the grapheme.
+    /// Returns `false` otherwise.
+    pub fn push(&mut self, c: char) -> bool {
+        self.0.push(c);
+        if self.0.graphemes(true).count() == 1 {
+            true
+        } else {
+            self.0.pop();
+            false
+        }
+    }
+
+    /// Returns `true` if the string was pushed to the grapheme.
+    /// Returns `false` otherwise.
+    pub fn push_str(&mut self, s: &str) -> bool {
+        let len = self.0.len();
+        self.0.push_str(s);
+        if self.0.graphemes(true).count() == 1 {
+            true
+        } else {
+            self.0.shrink_to(len);
+            false
+        }
+    }
+}
+
+impl From<String> for Grapheme {
+    #[track_caller]
+    fn from(s: String) -> Self {
+        let count = s.graphemes(true).count() == 1;
+        if count {
+            Grapheme(s)
+        } else {
+            panic!("Expected a single grapheme but instead got {count}")
+        }
+    }
+}
+
+impl From<&str> for Grapheme {
+    #[track_caller]
+    fn from(s: &str) -> Self {
+        Grapheme::from(s.to_string())
+    }
+}
+
+impl From<char> for Grapheme {
+    #[track_caller]
+    fn from(c: char) -> Self {
+        Grapheme::from(c.to_string())
+    }
+}
+
+impl fmt::Display for Grapheme {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Deref for Grapheme {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub trait IntoGraphemes {
+    fn into_graphemes(&self) -> impl Iterator<Item = Grapheme>;
+}
+
+/*
+impl<T> IntoGraphemes for T
+where
+    T: UnicodeSegmentation,
+{
+    fn into_graphemes(&self) -> impl Iterator<Item = Grapheme> {
+        self.graphemes(true)
+            .map(|grapheme| Grapheme(grapheme.to_string()))
+    }
+}
+*/
+
+impl IntoGraphemes for str {
+    fn into_graphemes(&self) -> impl Iterator<Item = Grapheme> {
+        self.graphemes(true)
+            .map(|grapheme| Grapheme(grapheme.to_string()))
+    }
+}
+
+struct Graphemes<'a> {
+    inner: unicode_segmentation::Graphemes<'a>,
+}
 
 /// Represents everything that is currently on the screen, or that will be printed.
 /// It's an abstraction over direct calls to help with tests, debugging, and avoiding doing useless
@@ -23,12 +136,12 @@ use crate::screen::{ScreenArea, ScreenCoord};
 pub struct ScreenBuffer {
     area: ScreenArea,
     cursor: ScreenCoord,
-    buffer: Vec<StyledContent<String>>,
+    buffer: Vec<StyledContent<Grapheme>>,
 }
 
 impl ScreenBuffer {
     pub fn new(lines: u16, columns: u16) -> Self {
-        let c = StyledContent::new(ContentStyle::new(), "".to_string());
+        let c = StyledContent::new(ContentStyle::new(), Grapheme::from(" "));
         Self {
             area: ScreenArea::new(
                 ScreenCoord::zero(),
@@ -83,6 +196,24 @@ impl ScreenBuffer {
         stdout.flush()
     }
 
+    pub fn get(&self, coord: ScreenCoord) -> Option<&StyledContent<Grapheme>> {
+        if coord.line >= self.area.height() || coord.column >= self.area.width() {
+            None
+        } else {
+            self.buffer
+                .get((coord.line * self.area.width() + coord.column) as usize)
+        }
+    }
+
+    pub fn get_mut(&mut self, coord: ScreenCoord) -> Option<&mut StyledContent<Grapheme>> {
+        if coord.line >= self.area.height() || coord.column >= self.area.width() {
+            None
+        } else {
+            self.buffer
+                .get_mut((coord.line * self.area.width() + coord.column) as usize)
+        }
+    }
+
     /// Convert the `ScreenBuffer` to a `SubScreen` covering the whole screen.
     pub fn as_sub_screen<'a>(&'a mut self) -> SubScreen<'a> {
         SubScreen {
@@ -100,24 +231,33 @@ impl ScreenBuffer {
 }
 
 impl ops::Index<ScreenCoord> for ScreenBuffer {
-    type Output = StyledContent<String>;
+    type Output = StyledContent<Grapheme>;
 
     #[track_caller]
     fn index(&self, coord: ScreenCoord) -> &Self::Output {
-        if coord.line >= self.area.height() || coord.column >= self.area.width() {
-            panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
+        match self.get(coord) {
+            Some(grapheme) => grapheme,
+            None => panic!(
+                "Overflow: Tried to retrieve the grapheme {coord:?} in a buffer of dimensions: ({}, {})",
+                self.area.height(),
+                self.area.width()
+            ),
         }
-        &self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
 
 impl ops::IndexMut<ScreenCoord> for ScreenBuffer {
     #[track_caller]
     fn index_mut(&mut self, coord: ScreenCoord) -> &mut Self::Output {
-        if coord.line >= self.area.height() || coord.column >= self.area.width() {
-            panic!("Overflow: Tried to retrieve the character {coord:?} in a buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
+        let area = self.area;
+        match self.get_mut(coord) {
+            Some(grapheme) => grapheme,
+            None => panic!(
+                "Overflow: Tried to retrieve the grapheme {coord:?} in a buffer of dimensions: ({}, {})",
+                area.height(),
+                area.width()
+            ),
         }
-        &mut self.buffer[(coord.line * self.area.width() + coord.column) as usize]
     }
 }
 
@@ -208,7 +348,27 @@ impl<'a> SubScreen<'a> {
         }
     }
 
-    pub fn fill(&mut self, content: StyledContent<String>) {
+    pub fn get(&self, coord: ScreenCoord) -> Option<&StyledContent<Grapheme>> {
+        if !self.area.contains_internal_coord(coord) {
+            None
+        } else {
+            let coord = self.area.translate_internal_coord(coord);
+            let screen_buffer = unsafe { &*self.screen_buffer };
+            screen_buffer.get(coord)
+        }
+    }
+
+    pub fn get_mut(&mut self, coord: ScreenCoord) -> Option<&mut StyledContent<Grapheme>> {
+        if !self.area.contains_internal_coord(coord) {
+            None
+        } else {
+            let coord = self.area.translate_internal_coord(coord);
+            let screen_buffer = unsafe { &mut *self.screen_buffer };
+            screen_buffer.get_mut(coord)
+        }
+    }
+
+    pub fn fill(&mut self, content: StyledContent<Grapheme>) {
         for coord in self.area.iter() {
             self[coord] = content.clone();
         }
@@ -216,34 +376,41 @@ impl<'a> SubScreen<'a> {
 }
 
 impl<'a> ops::Index<ScreenCoord> for SubScreen<'a> {
-    type Output = StyledContent<String>;
+    type Output = StyledContent<Grapheme>;
 
     #[track_caller]
     fn index(&self, coord: ScreenCoord) -> &Self::Output {
-        if !self.area.contains_internal_coord(coord) {
-            panic!("Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
+        match self.get(coord) {
+        None =>
+            panic!(
+                "Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})",
+                self.area.height(),
+                self.area.width()
+            ),
+            Some(grapheme) => grapheme,
         }
-        let coord = self.area.translate_internal_coord(coord);
-        let screen_buffer = unsafe { &*self.screen_buffer };
-        &screen_buffer[coord]
     }
 }
 
 impl<'a> ops::IndexMut<ScreenCoord> for SubScreen<'a> {
     #[track_caller]
     fn index_mut(&mut self, coord: ScreenCoord) -> &mut Self::Output {
-        if !self.area.contains_internal_coord(coord) {
-            panic!("Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})", self.area.height(), self.area.width());
+        let area = self.area;
+        match self.get_mut(coord) {
+        None =>
+            panic!(
+                "Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})",
+                area.height(),
+                area.width()
+            ),
+            Some(grapheme) => grapheme,
         }
-        let coord = self.area.translate_internal_coord(coord);
-        let screen_buffer = unsafe { &mut *self.screen_buffer };
-        &mut screen_buffer[coord]
     }
 }
 
 #[cfg(test)]
 mod test {
-    use insta::{assert_debug_snapshot, assert_snapshot};
+    use insta::assert_snapshot;
 
     use super::*;
 
@@ -258,14 +425,14 @@ mod test {
             };
             screen[coord] = StyledContent::new(ContentStyle::new(), "-".into());
             coord.line += 1;
-            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.into());
         }
         for (i, c) in "|tabs|tabs".chars().enumerate() {
             let mut coord = ScreenCoord {
                 line: 0,
                 column: i as u16,
             };
-            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.line += 1;
             screen[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
         }
@@ -275,7 +442,7 @@ mod test {
                 line: i as u16,
                 column: 0,
             };
-            screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            screen[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.column += 1;
             screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
             // shove 3 spaces for identation.
@@ -289,7 +456,7 @@ mod test {
                     column: (2 + j + (i % 3)) as u16,
                 };
                 println!("Showing {c} in {coord:?}");
-                screen[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+                screen[coord] = StyledContent::new(ContentStyle::new(), c.into());
             }
         }
 
@@ -321,9 +488,9 @@ mod test {
                 line: 0,
                 column: i as u16,
             };
-            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
             coord.line += 1;
-            status_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            status_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
         }
 
         let mut tabs_view = sub_screen.sub_screen(ScreenArea::new(
@@ -335,9 +502,9 @@ mod test {
                 line: 0,
                 column: i as u16,
             };
-            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.line += 1;
-            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
         }
 
         let mut code_view = sub_screen.sub_screen(ScreenArea::new(
@@ -349,9 +516,9 @@ mod test {
                 line: i as u16,
                 column: 0,
             };
-            code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            code_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.column += 1;
-            code_view[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            code_view[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
             // shove 3 spaces for identation.
             for _ in 0..4 {
                 coord.column += 1;
@@ -362,7 +529,7 @@ mod test {
                     line: i as u16,
                     column: (2 + j + (i % 3)) as u16,
                 };
-                code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+                code_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             }
         }
 
@@ -400,9 +567,9 @@ mod test {
                 line: 0,
                 column: i as u16,
             };
-            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            status_view[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
             coord.line += 1;
-            status_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            status_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
         }
 
         let (mut tabs_view, mut sub_screen) = sub_screen.split_after_line(1);
@@ -416,9 +583,9 @@ mod test {
                 line: 0,
                 column: i as u16,
             };
-            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.line += 1;
-            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.to_string());
+            tabs_view[coord] = StyledContent::new(ContentStyle::new(), '-'.into());
         }
 
         let (mut gutter_view, mut code_view) = sub_screen.split_after_col(1);
@@ -432,9 +599,9 @@ mod test {
                 line: i as u16,
                 column: 0,
             };
-            gutter_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+            gutter_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             coord.column += 1;
-            gutter_view[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+            gutter_view[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
 
             // shove 3 spaces for identation.
             coord.column = 0;
@@ -447,7 +614,7 @@ mod test {
                     line: i as u16,
                     column: (j + (i % 3)) as u16,
                 };
-                code_view[coord] = StyledContent::new(ContentStyle::new(), c.to_string());
+                code_view[coord] = StyledContent::new(ContentStyle::new(), c.into());
             }
         }
 
@@ -473,7 +640,7 @@ mod test {
             line: 0,
             column: 10,
         };
-        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
     }
 
     #[test]
@@ -484,7 +651,7 @@ mod test {
             line: 10,
             column: 0,
         };
-        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
     }
 
     #[test]
@@ -495,7 +662,7 @@ mod test {
             line: 10,
             column: 10,
         };
-        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
     }
 
     #[test]
@@ -506,7 +673,7 @@ mod test {
             line: 10000,
             column: 10000,
         };
-        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.to_string());
+        screen[coord] = StyledContent::new(ContentStyle::new(), '|'.into());
     }
 
     #[test]
