@@ -149,6 +149,25 @@ impl Screen {
         self.view.delete(delete_direction)
     }
 
+    pub fn open_popup(&mut self) -> ActionResult {
+        let (_buffer_id, buffer) = self.server.create_scratch_buffer();
+        buffer.rope.blocking_write().insert(0, "popup");
+
+        let content = BufferView {
+            width: 20,
+            height: 5,
+            top_line: 0,
+            active: false,
+            selection: Selection::default(),
+            buffer,
+        };
+        self.popups.push(Popup {
+            position: PopupPosition::Bottom,
+            content,
+        });
+        ActionResult::Redraw
+    }
+
     pub fn change_mode(&mut self, mode: crate::Mode) -> io::Result<ActionResult> {
         let cursor_shape = match mode {
             crate::Mode::Normal => SetCursorStyle::DefaultUserShape,

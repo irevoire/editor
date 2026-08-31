@@ -11,6 +11,7 @@ pub enum Action {
     MoveAnchor(Anchor, Direction),
     Insert(char),
     Delete(DeleteDirection),
+    OpenPopup,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -162,6 +162,7 @@ impl Editor {
             }
             Action::Insert(c) => Ok(self.screen.insert(c)),
             Action::Delete(delete_direction) => Ok(self.screen.delete(delete_direction)),
+            Action::OpenPopup => Ok(self.screen.open_popup()),
         }
     }
 
@@ -196,6 +197,7 @@ impl Editor {
                 KeyCode::Char(c) => match c {
                     'q' => Some(Action::Quit),
                     'i' => Some(Action::ChangeMode(Mode::Insert)),
+                    ' ' => Some(Action::OpenPopup),
                     _ => None,
                 },
 

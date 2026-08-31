@@ -37,6 +37,16 @@ impl ServerHandle {
         receiver.recv().unwrap()
     }
 
+    pub fn create_scratch_buffer(&self) -> (BufferId, Arc<Buffer>) {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Command::GlobalQuery(GlobalQuery::CreateScratchBuffer(
+                sender,
+            )))
+            .unwrap();
+        receiver.recv().unwrap()
+    }
+
     pub fn get_lines(&self, buffer: BufferId, start: usize, len: usize) -> (Vec<String>, usize) {
         let (sender, receiver) = oneshot::channel();
         self.sender
