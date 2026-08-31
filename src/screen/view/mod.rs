@@ -1,4 +1,4 @@
-use ropey::{RopeSlice, iter::Chunks};
+use ropey::{iter::Chunks, RopeSlice};
 use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 
 pub mod buffer_view;
