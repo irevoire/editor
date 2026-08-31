@@ -1,8 +1,9 @@
 use crossterm::style::{ContentStyle, StyledContent};
-use jiff::Timestamp;
-use unicode_segmentation::UnicodeSegmentation;
+use jiff::{SignedDuration, Timestamp};
 
 use crate::screen::{
+    animation::LoopingAnimation,
+    component::Component,
     screen_buffer::{Grapheme, IntoGraphemes, SubScreen},
     ScreenCoord,
 };
@@ -34,8 +35,9 @@ pub struct FixedSizeText {
     displaying_from: usize,
     /// The byte index we stop displaying the text at
     displaying_to: usize,
-    /// Last time the text was displayed
-    displayed_at: Timestamp,
+    /// Store our step in the animation.
+    /// If set to `None`, it means we've never been drawn.
+    loop_anim: Option<LoopingAnimation>,
 }
 
 impl FixedSizeText {
@@ -48,7 +50,7 @@ impl FixedSizeText {
             overflow,
             displaying_from: 0,
             displaying_to: 0,
-            displayed_at: Timestamp::MIN,
+            loop_anim: None,
         }
     }
 
@@ -58,7 +60,7 @@ impl FixedSizeText {
 
     pub fn resize(&mut self, size: usize) {
         self.size = size;
-        self.compute_displaying_from_to();
+        self.recompute_displaying_from_to();
     }
 
     pub fn overflow(&self) -> FixedSizeTextOverflow {
@@ -67,7 +69,7 @@ impl FixedSizeText {
 
     pub fn set_overflow(&mut self, overflow: FixedSizeTextOverflow) {
         self.overflow = overflow;
-        self.compute_displaying_from_to();
+        self.recompute_displaying_from_to();
     }
 
     pub fn text(&self) -> &str {
@@ -77,10 +79,11 @@ impl FixedSizeText {
     pub fn set_text(&mut self, text: String) {
         self.text = text;
         self.graphemes = self.text.into_graphemes().collect();
-        self.compute_displaying_from_to();
+        self.recompute_displaying_from_to();
     }
 
-    fn compute_displaying_from_to(&mut self) {
+    fn recompute_displaying_from_to(&mut self) {
+        self.loop_anim = None;
         match self.overflow {
             FixedSizeTextOverflow::CropRight | FixedSizeTextOverflow::Animate => {
                 self.displaying_from = 0;
@@ -92,17 +95,24 @@ impl FixedSizeText {
             }
         }
     }
+}
 
+impl Component for FixedSizeText {
     /// Will panic if called from a screen smaller than the required size
-    pub fn draw(&mut self, now: Timestamp, mut screen: SubScreen<'_>) {
+    fn draw(&mut self, now: Timestamp, screen: &mut SubScreen<'_>) {
         assert!(self.size() <= screen.width() as usize);
-        if self.displayed_at == Timestamp::MIN {
-            self.displayed_at = now;
-        } else if now.duration_since(self.displayed_at).as_secs_f32() >= 0.5 {
-            self.displayed_at = now;
-            self.displaying_from = self.displaying_from + 1 % self.graphemes.len();
-            self.displaying_to = self.displaying_to + 1 % self.graphemes.len();
-        }
+
+        let (from, to) = if self.overflow == FixedSizeTextOverflow::Animate {
+            let anim = self.loop_anim.get_or_insert_with(|| {
+                LoopingAnimation::start(now, SignedDuration::from_millis(500))
+            });
+            let step = anim.step(now);
+            let width = self.displaying_to - self.displaying_from;
+            (step, step + width)
+        } else {
+            (self.displaying_from, self.displaying_to)
+        };
+
         for (idx, grapheme) in self
             .graphemes
             .iter()
@@ -110,8 +120,8 @@ impl FixedSizeText {
             // the end and the start.
             .chain(std::iter::once(&Grapheme::space()))
             .cycle()
-            .skip(self.displaying_from)
-            .take(self.displaying_to.abs_diff(self.displaying_from))
+            .skip(from)
+            .take(to.abs_diff(from))
             .enumerate()
         {
             let coord = ScreenCoord {
@@ -119,6 +129,17 @@ impl FixedSizeText {
                 column: idx as u16,
             };
             screen[coord] = StyledContent::new(self.style.clone(), grapheme.clone());
+        }
+    }
+
+    fn next_wakeup(&self, now: Timestamp) -> Option<Timestamp> {
+        if self.overflow != FixedSizeTextOverflow::Animate {
+            return None;
+        }
+        match &self.loop_anim {
+            Some(anim) => anim.next_wakeup(now),
+            // This means we've never been drawn ever.
+            None => Some(now),
         }
     }
 }
@@ -142,7 +163,7 @@ mod test {
         assert_eq!(text.size(), 10);
         assert_eq!(text.overflow(), FixedSizeTextOverflow::CropLeft);
 
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"");
 
         text.set_text(String::from("Hello"));
@@ -151,7 +172,7 @@ mod test {
         assert_eq!(text.size(), 10);
         assert_eq!(text.overflow(), FixedSizeTextOverflow::CropRight);
 
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello");
     }
 
@@ -161,17 +182,17 @@ mod test {
 
         let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropRight);
         text.set_text(String::from("Hello World!"));
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
         text.resize(11);
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello World");
 
         text.set_overflow(FixedSizeTextOverflow::CropLeft);
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"ello World!");
         text.resize(11);
-        text.draw(Timestamp::UNIX_EPOCH, screen.as_sub_screen());
+        text.draw(Timestamp::UNIX_EPOCH, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"ello World!");
     }
 
@@ -182,50 +203,49 @@ mod test {
         let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::Animate);
         text.set_text(String::from("Hello World!"));
         let mut now = Timestamp::new(0, 0).unwrap();
-        text.draw(now, screen.as_sub_screen());
+        text.draw(now, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
-        text.draw(now, screen.as_sub_screen());
+        text.draw(now, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
 
         now += 400.milliseconds();
-        text.draw(now, screen.as_sub_screen());
+        text.draw(now, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
 
         now += 150.milliseconds();
-        text.draw(now, screen.as_sub_screen());
+        text.draw(now, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"ello World");
 
         now += 10.seconds();
-        text.draw(now, screen.as_sub_screen());
-        assert_snapshot!(screen.display_as_text(), @"llo World!");
+        text.draw(now, &mut screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"rld! Hello");
 
         let mut ret = String::new();
         for _ in 0..12 {
             now += 500.milliseconds();
-            text.draw(now, screen.as_sub_screen());
+            text.draw(now, &mut screen.as_sub_screen());
             ret.push_str(&screen.display_as_text());
             ret.push('\n');
         }
-        assert_snapshot!(ret, @r"
-        lo World!      
-        o World! H     
-         World! He     
-        World! Hel     
-        orld! Hell     
-        rld! Hello     
+        assert_snapshot!(ret, @"
         ld! Hello      
         d! Hello W     
         ! Hello Wo     
          Hello Wor     
         Hello Worl     
-        ello World
+        ello World     
+        llo World!     
+        lo World!      
+        o World! H     
+         World! He     
+        World! Hel     
+        orld! Hell
         ");
 
         // By adding one char we could either show the h or the !. But we should
         // reset the animation and start again from the beginning.
         text.resize(11);
-        dbg!(&text);
-        text.draw(now, screen.as_sub_screen());
+        text.draw(now, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello World");
     }
 }

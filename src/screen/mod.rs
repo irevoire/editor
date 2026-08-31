@@ -1,20 +1,18 @@
-use crossterm::{
-    cursor::SetCursorStyle,
-    style::{ContentStyle, StyledContent, Stylize},
-    ExecutableCommand, QueueableCommand,
-};
+use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
 use std::io;
 
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
     screen::{
-        screen_buffer::{Grapheme, ScreenBuffer, SubScreen},
+        screen_buffer::{ScreenBuffer, SubScreen},
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
     ActionResult, GlobalContext, Selection, SelectionMode,
 };
 
+pub mod animation;
+pub mod component;
 pub mod components;
 mod geo;
 pub mod screen_buffer;
