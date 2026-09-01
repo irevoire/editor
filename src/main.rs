@@ -100,7 +100,7 @@ pub struct Selection {
     head: Cursor,
 }
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, strum::VariantNames, strum::EnumString)]
 pub enum Mode {
     #[default]
     Normal,
@@ -159,6 +159,7 @@ impl Editor {
             Action::FocusGained => Ok(self.screen.focus_gained()),
             Action::FocusLost => Ok(self.screen.focus_lost()),
             Action::Redraw => Ok(self.screen.draw(now, &self.context)),
+            Action::PasteRawString(_) => todo!(),
             Action::Paste(_) => todo!(),
             Action::ChangeMode(mode) => {
                 self.context.mode = mode;
@@ -223,7 +224,7 @@ impl Editor {
                 KeyCode::Modifier(modifier_key_code) => todo!(),
             },
             Event::Mouse(mouse_event) => None,
-            Event::Paste(content) => Some(Action::Paste(content)),
+            Event::Paste(content) => Some(Action::PasteRawString(content)),
             Event::Resize(_, _) => Some(Action::Redraw),
         }
     }
