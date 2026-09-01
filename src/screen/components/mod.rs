@@ -2,6 +2,7 @@ use crossterm::style::{ContentStyle, StyledContent, Stylize};
 use jiff::Timestamp;
 
 use crate::{
+    config::Config,
     screen::{
         component::Component,
         screen_buffer::{Grapheme, SubScreen},
@@ -22,17 +23,6 @@ pub struct StatusBar {
 /// The number of terminal cells reserved to display the current mode.
 const MODE_WIDTH: usize = 5;
 
-impl Default for StatusBar {
-    fn default() -> Self {
-        let mut mode = FixedSizeText::new(MODE_WIDTH, FixedSizeTextOverflow::Animate);
-        mode.set_style(ContentStyle::new().on_dark_grey().white());
-
-        Self {
-            position: StatusBarPosition::default(),
-            mode,
-        }
-    }
-}
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 enum StatusBarPosition {
     #[default]
@@ -40,8 +30,14 @@ enum StatusBarPosition {
 }
 
 impl StatusBar {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(config: &Config) -> Self {
+        let mut mode = FixedSizeText::new(MODE_WIDTH, FixedSizeTextOverflow::Animate, config);
+        mode.set_style(ContentStyle::new().on_dark_grey().white());
+
+        Self {
+            position: StatusBarPosition::default(),
+            mode,
+        }
     }
 
     pub fn draw<'a: 'b, 'b>(
@@ -89,8 +85,8 @@ mod test {
     #[test]
     fn status_bar_displays_current_mode() {
         let mut screen = ScreenBuffer::new(1, 15);
-        let mut status_bar = StatusBar::new();
         let mut ctx = GlobalContext::default();
+        let mut status_bar = StatusBar::new(&ctx.config);
 
         ctx.mode = Mode::Normal;
         status_bar.draw(Timestamp::UNIX_EPOCH, &ctx, screen.as_sub_screen());
@@ -104,8 +100,8 @@ mod test {
     #[test]
     fn status_bar_animates_mode_that_overflows() {
         let mut screen = ScreenBuffer::new(1, 15);
-        let mut status_bar = StatusBar::new();
         let mut ctx = GlobalContext::default();
+        let mut status_bar = StatusBar::new(&ctx.config);
         ctx.mode = Mode::Insert;
 
         let mut now = Timestamp::UNIX_EPOCH;

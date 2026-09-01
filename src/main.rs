@@ -14,11 +14,13 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{component::Component as _, components::StatusBar, Screen, ScreenCoord},
+    config::Config,
+    screen::{Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
 
 mod action;
+mod config;
 mod screen;
 mod server;
 mod utils;
@@ -128,10 +130,20 @@ pub struct Editor {
     context: GlobalContext,
 }
 
-#[derive(Default)]
 pub struct GlobalContext {
     mode: Mode,
     selection_mode: SelectionMode,
+    config: Config,
+}
+
+impl Default for GlobalContext {
+    fn default() -> Self {
+        Self {
+            mode: Mode::default(),
+            selection_mode: SelectionMode::default(),
+            config: Config::default(),
+        }
+    }
 }
 
 pub enum ActionResult {
@@ -142,10 +154,15 @@ pub enum ActionResult {
 
 impl Editor {
     pub fn new(server: ServerHandle, stdout: io::Stdout) -> Self {
+        let config = Config::default();
         Self {
-            screen: Screen::new(server.clone(), stdout),
+            screen: Screen::new(server.clone(), stdout, &config),
             server,
-            context: Default::default(),
+            context: GlobalContext {
+                mode: Mode::default(),
+                selection_mode: SelectionMode::default(),
+                config,
+            },
         }
     }
 

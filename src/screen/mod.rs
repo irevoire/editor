@@ -4,6 +4,7 @@ use std::io;
 
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
+    config::Config,
     screen::{
         components::StatusBar,
         screen_buffer::{ScreenBuffer, SubScreen},
@@ -82,7 +83,7 @@ impl Popup {
 }
 
 impl Screen {
-    pub fn new(server: ServerHandle, stdout: io::Stdout) -> Screen {
+    pub fn new(server: ServerHandle, stdout: io::Stdout, config: &Config) -> Screen {
         let (col, row) = crossterm::terminal::size().unwrap();
         log::warn!("Opened a terminal with {col} columns and {row} rows");
 
@@ -101,7 +102,7 @@ impl Screen {
             },
             buffer: ScreenBuffer::new(row, col),
             popups: Vec::new(),
-            status_bar: StatusBar::default(),
+            status_bar: StatusBar::new(config),
         }
     }
 

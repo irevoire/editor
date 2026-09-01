@@ -2,6 +2,7 @@ use crossterm::style::{ContentStyle, StyledContent};
 use jiff::{SignedDuration, Timestamp};
 
 use crate::{
+    config::Config,
     screen::{
         animation::LoopingAnimation,
         component::Component,
@@ -38,13 +39,15 @@ pub struct FixedSizeText {
     displaying_from: usize,
     /// The byte index we stop displaying the text at
     displaying_to: usize,
+    /// How long a single step of the animation should last
+    animation_speed: SignedDuration,
     /// Store our step in the animation.
     /// If set to `None`, it means we've never been drawn.
     loop_anim: Option<LoopingAnimation>,
 }
 
 impl FixedSizeText {
-    pub fn new(size: usize, overflow: FixedSizeTextOverflow) -> Self {
+    pub fn new(size: usize, overflow: FixedSizeTextOverflow, config: &Config) -> Self {
         Self {
             size,
             text: String::new(),
@@ -53,6 +56,7 @@ impl FixedSizeText {
             overflow,
             displaying_from: 0,
             displaying_to: 0,
+            animation_speed: config.get_status_bar_animation_speed(),
             loop_anim: None,
         }
     }
@@ -110,9 +114,9 @@ impl Component for FixedSizeText {
         assert!(self.size() <= screen.width() as usize);
 
         let (from, to) = if self.overflow == FixedSizeTextOverflow::Animate {
-            let anim = self.loop_anim.get_or_insert_with(|| {
-                LoopingAnimation::start(now, SignedDuration::from_millis(500))
-            });
+            let anim = self
+                .loop_anim
+                .get_or_insert_with(|| LoopingAnimation::start(now, self.animation_speed));
             let step = anim.step(now);
             let width = self.displaying_to - self.displaying_from;
             (step, step + width)
@@ -166,7 +170,7 @@ mod test {
         let mut screen = ScreenBuffer::new(1, 10);
         let ctx = GlobalContext::default();
 
-        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropLeft);
+        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropLeft, &ctx.config);
         assert_eq!(text.text(), "");
         assert_eq!(text.size(), 10);
         assert_eq!(text.overflow(), FixedSizeTextOverflow::CropLeft);
@@ -189,7 +193,7 @@ mod test {
         let mut screen = ScreenBuffer::new(1, 15);
         let ctx = GlobalContext::default();
 
-        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropRight);
+        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::CropRight, &ctx.config);
         text.set_text(String::from("Hello World!"));
         text.draw(Timestamp::UNIX_EPOCH, &ctx, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello Worl");
@@ -210,7 +214,7 @@ mod test {
         let mut screen = ScreenBuffer::new(1, 15);
         let ctx = GlobalContext::default();
 
-        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::Animate);
+        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::Animate, &ctx.config);
         text.set_text(String::from("Hello World!"));
         let mut now = Timestamp::new(0, 0).unwrap();
         text.draw(now, &ctx, &mut screen.as_sub_screen());
@@ -257,5 +261,26 @@ mod test {
         text.resize(11);
         text.draw(now, &ctx, &mut screen.as_sub_screen());
         assert_snapshot!(screen.display_as_text(), @"Hello World");
+    }
+
+    #[test]
+    fn animation_speed_is_read_from_config() {
+        let mut screen = ScreenBuffer::new(1, 10);
+        let ctx = GlobalContext::default();
+        ctx.config
+            .set_status_bar_animation_speed(jiff::SignedDuration::from_millis(100));
+
+        let mut text = FixedSizeText::new(10, FixedSizeTextOverflow::Animate, &ctx.config);
+        text.set_text(String::from("Hello World!"));
+        let mut now = Timestamp::new(0, 0).unwrap();
+
+        text.draw(now, &ctx, &mut screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"Hello Worl");
+
+        // With the default 500ms step, 100ms wouldn't be enough to advance
+        // the animation. With the configured 100ms step, it advances by one.
+        now += 100.milliseconds();
+        text.draw(now, &ctx, &mut screen.as_sub_screen());
+        assert_snapshot!(screen.display_as_text(), @"ello World");
     }
 }
