@@ -1,10 +1,10 @@
 use jiff::Timestamp;
 
-use crate::screen::screen_buffer::SubScreen;
+use crate::{screen::screen_buffer::SubScreen, GlobalContext};
 
 /// Something that can be drawn to a [`SubScreen`], given the current time.
 pub trait Component {
-    fn draw(&mut self, now: Timestamp, screen: &mut SubScreen<'_>);
+    fn draw(&mut self, now: Timestamp, ctx: &GlobalContext, screen: &mut SubScreen<'_>);
 
     /// The next timestamp at which this component wants to be redrawn.
     /// This doesn't give any guarantee on when you'll be drawn next

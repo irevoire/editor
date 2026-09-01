@@ -1,9 +1,11 @@
 use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
+use jiff::Timestamp;
 use std::io;
 
 use crate::{
     action::{Anchor, DeleteDirection, Direction},
     screen::{
+        components::StatusBar,
         screen_buffer::{ScreenBuffer, SubScreen},
         view::buffer_view::BufferView,
     },
@@ -26,6 +28,9 @@ pub struct Screen {
     server: ServerHandle,
     view: BufferView,
     popups: Vec<Popup>,
+
+    // Default components we always display on screen
+    status_bar: StatusBar,
 }
 
 pub enum PopupPosition {
@@ -96,6 +101,7 @@ impl Screen {
             },
             buffer: ScreenBuffer::new(row, col),
             popups: Vec::new(),
+            status_bar: StatusBar::default(),
         }
     }
 
@@ -113,12 +119,12 @@ impl Screen {
         ActionResult::Nothing
     }
 
-    pub fn draw(&mut self, ctx: &GlobalContext) -> ActionResult {
+    pub fn draw(&mut self, now: Timestamp, ctx: &GlobalContext) -> ActionResult {
         let mut sub_screen = self.buffer.as_sub_screen();
 
         let (mut tab_view, mut rem) = sub_screen.split_after_line(0);
-        let (mut code, status) = rem.split_after_line(rem.height() - 3);
-        ctx.status_bar.draw(status);
+        let (mut code, status) = rem.split_after_line(rem.height() - 2);
+        self.status_bar.draw(now, &ctx, status);
 
         self.view.draw_tab(&mut tab_view);
         self.view.draw_code(&mut code);
@@ -128,6 +134,10 @@ impl Screen {
 
         self.buffer.display_on_screen(&mut self.stdout).unwrap();
         ActionResult::Nothing
+    }
+
+    pub fn next_wakeup(&self, now: jiff::Timestamp) -> Option<Timestamp> {
+        self.status_bar.next_wakeup(now)
     }
 
     pub fn move_anchor(

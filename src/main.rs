@@ -1,9 +1,10 @@
 use crossterm::{
-    ExecutableCommand,
     event::{Event, KeyCode},
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
 };
 use env_logger::{Builder, Env, Target};
+use jiff::{SignedDuration, Timestamp};
 
 use std::{
     cmp::Ordering,
@@ -13,7 +14,7 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    screen::{Screen, ScreenCoord, components::StatusBar},
+    screen::{component::Component as _, components::StatusBar, Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
 
@@ -106,6 +107,15 @@ pub enum Mode {
     Insert,
 }
 
+impl Mode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Mode::Normal => "normal",
+            Mode::Insert => "insert",
+        }
+    }
+}
+
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SelectionMode {
     #[default]
@@ -122,7 +132,6 @@ pub struct Editor {
 pub struct GlobalContext {
     mode: Mode,
     selection_mode: SelectionMode,
-    status_bar: StatusBar,
 }
 
 pub enum ActionResult {
@@ -141,7 +150,7 @@ impl Editor {
     }
 
     /// Returns `true` if we should exit
-    pub fn process_action(&mut self, action: Action) -> io::Result<ActionResult> {
+    pub fn process_action(&mut self, now: Timestamp, action: Action) -> io::Result<ActionResult> {
         match action {
             Action::Quit => {
                 self.server.stop();
@@ -149,7 +158,7 @@ impl Editor {
             }
             Action::FocusGained => Ok(self.screen.focus_gained()),
             Action::FocusLost => Ok(self.screen.focus_lost()),
-            Action::Redraw => Ok(self.screen.draw(&self.context)),
+            Action::Redraw => Ok(self.screen.draw(now, &self.context)),
             Action::Paste(_) => todo!(),
             Action::ChangeMode(mode) => {
                 self.context.mode = mode;
@@ -166,8 +175,8 @@ impl Editor {
         }
     }
 
-    pub fn redraw(&mut self) {
-        self.screen.draw(&self.context);
+    pub fn redraw(&mut self, now: Timestamp) {
+        self.screen.draw(now, &mut self.context);
     }
 
     fn event_to_action(&self, event: Event) -> Option<Action> {
@@ -221,16 +230,33 @@ impl Editor {
 
     pub fn run(server: ServerHandle, stdout: io::Stdout) {
         let mut this = Self::new(server, stdout);
+        this.redraw(Timestamp::now());
         loop {
+            let now = Timestamp::now();
+            let has_event = match this.screen.next_wakeup(now) {
+                Some(wakeup) => {
+                    let timeout = wakeup.duration_since(now).max(SignedDuration::ZERO);
+                    crossterm::event::poll(timeout.unsigned_abs()).unwrap()
+                }
+                // Nothing is animating, we can block until the next input event.
+                None => true,
+            };
+
+            if !has_event {
+                // No input received, draw the animation and keep going on
+                this.redraw(now);
+                continue;
+            }
+
             let key = crossterm::event::read().unwrap();
             let Some(action) = this.event_to_action(key) else {
                 continue;
             };
-            let exit = this.process_action(action);
+            let exit = this.process_action(now, action);
             match exit {
                 Err(_) | Ok(ActionResult::Exit) => break,
                 Ok(ActionResult::Nothing) => (),
-                Ok(ActionResult::Redraw) => this.redraw(),
+                Ok(ActionResult::Redraw) => this.redraw(now),
             }
         }
         log::info!("redraw the screen");
