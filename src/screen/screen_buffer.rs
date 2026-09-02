@@ -6,9 +6,9 @@ use std::{
 };
 
 use crossterm::{
+    QueueableCommand,
     cursor::MoveTo,
     style::{ContentStyle, PrintStyledContent, StyledContent},
-    QueueableCommand,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -381,8 +381,7 @@ impl<'a> ops::Index<ScreenCoord> for SubScreen<'a> {
     #[track_caller]
     fn index(&self, coord: ScreenCoord) -> &Self::Output {
         match self.get(coord) {
-        None =>
-            panic!(
+            None => panic!(
                 "Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})",
                 self.area.height(),
                 self.area.width()
@@ -397,8 +396,7 @@ impl<'a> ops::IndexMut<ScreenCoord> for SubScreen<'a> {
     fn index_mut(&mut self, coord: ScreenCoord) -> &mut Self::Output {
         let area = self.area;
         match self.get_mut(coord) {
-        None =>
-            panic!(
+            None => panic!(
                 "Overflow: Tried to retrieve the character {coord:?} in a sub buffer of dimensions: ({}, {})",
                 area.height(),
                 area.width()

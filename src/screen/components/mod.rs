@@ -2,13 +2,13 @@ use crossterm::style::{ContentStyle, StyledContent, Stylize};
 use jiff::Timestamp;
 
 use crate::{
-    config::Config,
+    GlobalContext,
     screen::{
         component::Component,
         screen_buffer::{Grapheme, SubScreen},
     },
-    GlobalContext,
 };
+use config::Config;
 
 mod fixed_sized_text;
 pub use fixed_sized_text::*;
@@ -78,7 +78,7 @@ mod test {
     use insta::assert_snapshot;
     use jiff::ToSpan;
 
-    use crate::{screen::screen_buffer::ScreenBuffer, Mode};
+    use crate::{Mode, screen::screen_buffer::ScreenBuffer};
 
     use super::*;
 

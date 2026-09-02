@@ -1,9 +1,35 @@
 [package]
 name = "editor"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
+config = { workspace = true }
+crossterm = { workspace = true }
+env_logger = { workspace = true }
+jiff = { workspace = true }
+log = { workspace = true }
+oneshot = { workspace = true }
+ropey = { workspace = true }
+strsim = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+
+[workspace]
+resolver = "3"
+members = ["crates/config"]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+config = { path = "crates/config" }
+
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 env_logger = "0.11.11"
 jiff = "0.2.35"
@@ -18,6 +44,5 @@ thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
 unicode-segmentation = "1.13.3"
 
-[dev-dependencies]
 insta = "1.48.0"
 tempfile = "3.27.0"

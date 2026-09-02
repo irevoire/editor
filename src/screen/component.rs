@@ -1,6 +1,6 @@
 use jiff::Timestamp;
 
-use crate::{screen::screen_buffer::SubScreen, GlobalContext};
+use crate::{GlobalContext, screen::screen_buffer::SubScreen};
 
 /// Something that can be drawn to a [`SubScreen`], given the current time.
 pub trait Component {

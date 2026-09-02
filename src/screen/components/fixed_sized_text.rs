@@ -2,15 +2,15 @@ use crossterm::style::{ContentStyle, StyledContent};
 use jiff::{SignedDuration, Timestamp};
 
 use crate::{
-    config::Config,
+    GlobalContext,
     screen::{
+        ScreenCoord,
         animation::LoopingAnimation,
         component::Component,
         screen_buffer::{Grapheme, IntoGraphemes, SubScreen},
-        ScreenCoord,
     },
-    GlobalContext,
 };
+use config::Config;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FixedSizeTextOverflow {

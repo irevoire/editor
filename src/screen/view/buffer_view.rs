@@ -5,14 +5,14 @@ use crossterm::style::{ContentStyle, StyledContent, Stylize};
 #[cfg(test)]
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
+    ActionResult, Cursor, Selection, SelectionMode,
     action::{Anchor, DeleteDirection, Direction},
     screen::{
+        ScreenCoord,
         screen_buffer::{Grapheme, SubScreen},
         view::RopeGraphemes,
-        ScreenCoord,
     },
     server::Buffer,
-    ActionResult, Cursor, Selection, SelectionMode,
 };
 
 pub struct BufferView {
@@ -115,7 +115,7 @@ impl BufferView {
     /// See `set_cursor` instead.
     #[cfg(test)]
     pub fn draw_selection(&self, buffer: &mut SubScreen) {
-        use crate::{screen::ScreenCoord, Cursor};
+        use crate::{Cursor, screen::ScreenCoord};
 
         const BOX_MODIFIER: char = '\u{20DE}';
         const UNDERLINE_MODIFIER: char = '\u{0332}';
@@ -272,7 +272,7 @@ pub mod test {
     use ropey::Rope;
     use tokio::sync::RwLock;
 
-    use crate::{screen::screen_buffer::ScreenBuffer, Cursor};
+    use crate::{Cursor, screen::screen_buffer::ScreenBuffer};
 
     use super::*;
 

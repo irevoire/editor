@@ -1,7 +1,7 @@
 use crossterm::{
-    event::{Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{Event, KeyCode},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use env_logger::{Builder, Env, Target};
 use jiff::{SignedDuration, Timestamp};
@@ -14,13 +14,12 @@ use std::{
 
 use crate::{
     action::{Action, Anchor, DeleteDirection, Direction},
-    config::Config,
     screen::{Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
+use config::Config;
 
 mod action;
-mod config;
 mod screen;
 mod server;
 mod utils;

@@ -1,18 +1,18 @@
-use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
+use crossterm::{ExecutableCommand, QueueableCommand, cursor::SetCursorStyle};
 use jiff::Timestamp;
 use std::io;
 
 use crate::{
+    ActionResult, GlobalContext, Selection, SelectionMode,
     action::{Anchor, DeleteDirection, Direction},
-    config::Config,
     screen::{
         components::StatusBar,
         screen_buffer::{ScreenBuffer, SubScreen},
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
-    ActionResult, GlobalContext, Selection, SelectionMode,
 };
+use config::Config;
 
 pub mod animation;
 pub mod component;

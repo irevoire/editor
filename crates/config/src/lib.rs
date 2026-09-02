@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use thiserror::Error;
 
 /// The defaults configuration. Forms the root of every [`ConfigLayer`] chain.
-const DEFAULT_CONFIG_KDL: &str = include_str!("../default_configuration.kdl");
+const DEFAULT_CONFIG_KDL: &str = include_str!("../../../default_configuration.kdl");
 
 /// The name looked for in the directory of the file being edited, and at the
 /// root of the project.
