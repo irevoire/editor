@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+use config_macros::ConfigField;
 use jiff::SignedDuration;
 use parking_lot::RwLock;
 use thiserror::Error;
@@ -33,12 +34,13 @@ struct InnerConfig {
     layer: RwLock<ConfigLayer>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, ConfigField)]
 struct ConfigLayer {
     status_bar: StatusBarConfig,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ConfigField)]
+#[config(path = "status_bar")]
 struct StatusBarConfig {
     animation_speed: Option<SignedDuration>,
 }
@@ -114,24 +116,6 @@ impl Config {
     /// Create a new empty config that uses the current config as a base.
     pub fn fork(&self) -> Config {
         self.load_layer(ConfigLayer::default())
-    }
-
-    /// Retrieve the `status_bar_animation_speed`.
-    /// It traverse all config files until it find a set value.
-    pub fn get_status_bar_animation_speed(&self) -> SignedDuration {
-        self.0.resolve(|layer| layer.status_bar.animation_speed)
-    }
-
-    /// Set the `status_bar_animation_speed` only for this layer.
-    /// The base config is not affected.
-    pub fn set_status_bar_animation_speed(&self, value: SignedDuration) {
-        self.0.layer.write().status_bar.animation_speed = Some(value);
-    }
-
-    /// Unset the `status_bar_animation_speed` only for this layer.
-    /// The base config is not affected.
-    pub fn unset_status_bar_animation_speed(&self) {
-        self.0.layer.write().status_bar.animation_speed = None;
     }
 }
 

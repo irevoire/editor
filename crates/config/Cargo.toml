@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+config-macros = { workspace = true }
 jiff = { workspace = true }
 kdl = { workspace = true }
 log = { workspace = true }
