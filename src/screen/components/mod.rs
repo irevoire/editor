@@ -12,6 +12,8 @@ use config::Config;
 
 mod fixed_sized_text;
 pub use fixed_sized_text::*;
+mod popup;
+pub use popup::*;
 
 /// The status bar at the bottom of the screen
 #[derive(Debug)]

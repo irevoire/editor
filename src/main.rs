@@ -188,7 +188,7 @@ impl Editor {
             }
             Action::Insert(c) => Ok(self.screen.insert(c)),
             Action::Delete(delete_direction) => Ok(self.screen.delete(delete_direction)),
-            Action::OpenPopup => Ok(self.screen.open_popup()),
+            Action::OpenPopup => Ok(self.screen.open_popup(now)),
         }
     }
 

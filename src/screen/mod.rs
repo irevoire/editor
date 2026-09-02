@@ -1,13 +1,14 @@
 use crossterm::{ExecutableCommand, QueueableCommand, cursor::SetCursorStyle};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use std::io;
 
 use crate::{
     ActionResult, GlobalContext, Selection, SelectionMode,
     action::{Anchor, DeleteDirection, Direction},
     screen::{
-        components::StatusBar,
-        screen_buffer::{ScreenBuffer, SubScreen},
+        component::Component,
+        components::{Popup, PopupPosition, StatusBar},
+        screen_buffer::ScreenBuffer,
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
@@ -23,6 +24,10 @@ pub mod view;
 
 pub use geo::*;
 
+/// How long a popup takes to grow into place.
+/// TODO: make this configurable.
+const POPUP_ANIMATION_DURATION: SignedDuration = SignedDuration::from_millis(200);
+
 pub struct Screen {
     stdout: io::Stdout,
     buffer: ScreenBuffer,
@@ -32,54 +37,6 @@ pub struct Screen {
 
     // Default components we always display on screen
     status_bar: StatusBar,
-}
-
-pub enum PopupPosition {
-    Top,
-    Bottom,
-    Center,
-}
-
-pub struct Popup {
-    position: PopupPosition,
-    content: BufferView,
-}
-impl Popup {
-    fn draw(&self, screen: &mut SubScreen<'_>) {
-        // We want the top and bottom popups to be as far away on the right as possible
-
-        let area = match self.position {
-            PopupPosition::Top => ScreenArea::new(
-                ScreenCoord {
-                    line: 0,
-                    column: screen
-                        .width()
-                        .saturating_sub(self.content.width as u16)
-                        .max(screen.width() / 2),
-                },
-                ScreenCoord {
-                    line: self.content.height as u16,
-                    column: screen.width(),
-                },
-            ),
-            PopupPosition::Bottom => ScreenArea::new(
-                ScreenCoord {
-                    line: screen.height() - self.content.height as u16,
-                    column: screen
-                        .width()
-                        .saturating_sub(self.content.width as u16)
-                        .max(screen.width() / 2),
-                },
-                ScreenCoord {
-                    line: screen.height(),
-                    column: screen.width(),
-                },
-            ),
-            PopupPosition::Center => todo!(),
-        };
-        let mut sub_screen = screen.sub_screen(area);
-        self.content.draw_code(&mut sub_screen);
-    }
 }
 
 impl Screen {
@@ -129,16 +86,21 @@ impl Screen {
 
         self.view.draw_tab(&mut tab_view);
         self.view.draw_code(&mut code);
-        for popup in self.popups.iter_mut() {
-            popup.draw(&mut sub_screen);
-        }
+        self.popups.retain_mut(|popup| {
+            popup.draw(now, ctx, &mut sub_screen);
+            !popup.is_closed(now)
+        });
 
         self.buffer.display_on_screen(&mut self.stdout).unwrap();
         ActionResult::Nothing
     }
 
     pub fn next_wakeup(&self, now: jiff::Timestamp) -> Option<Timestamp> {
-        self.status_bar.next_wakeup(now)
+        let popups_wakeup = self.popups.iter().filter_map(|popup| popup.next_wakeup(now)).min();
+        [self.status_bar.next_wakeup(now), popups_wakeup]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     pub fn move_anchor(
@@ -158,7 +120,15 @@ impl Screen {
         self.view.delete(delete_direction)
     }
 
-    pub fn open_popup(&mut self) -> ActionResult {
+    /// Opens a new popup, unless one is already open, in which case it closes it instead.
+    pub fn open_popup(&mut self, now: Timestamp) -> ActionResult {
+        if let Some(popup) = self.popups.last_mut() {
+            if !popup.is_closing() {
+                popup.close(now);
+            }
+            return ActionResult::Redraw;
+        }
+
         let (_buffer_id, buffer) = self.server.create_scratch_buffer();
         buffer.rope.blocking_write().insert(0, "popup");
 
@@ -170,10 +140,11 @@ impl Screen {
             selection: Selection::default(),
             buffer,
         };
-        self.popups.push(Popup {
-            position: PopupPosition::Bottom,
+        self.popups.push(Popup::new(
+            PopupPosition::Bottom,
             content,
-        });
+            POPUP_ANIMATION_DURATION,
+        ));
         ActionResult::Redraw
     }
 
