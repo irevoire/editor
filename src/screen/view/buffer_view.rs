@@ -5,14 +5,14 @@ use crossterm::style::{ContentStyle, StyledContent, Stylize};
 #[cfg(test)]
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
-    ActionResult, Cursor, Selection, SelectionMode,
     action::{Anchor, DeleteDirection, Direction},
     screen::{
-        ScreenCoord,
         screen_buffer::{Grapheme, SubScreen},
         view::RopeGraphemes,
+        ScreenCoord,
     },
     server::Buffer,
+    ActionResult, Cursor, Selection, SelectionMode,
 };
 
 pub struct BufferView {
@@ -22,6 +22,7 @@ pub struct BufferView {
     pub active: bool,
     pub selection: Selection,
     pub buffer: Arc<Buffer>,
+    pub background: ContentStyle,
 }
 
 impl BufferView {
@@ -115,7 +116,7 @@ impl BufferView {
     /// See `set_cursor` instead.
     #[cfg(test)]
     pub fn draw_selection(&self, buffer: &mut SubScreen) {
-        use crate::{Cursor, screen::ScreenCoord};
+        use crate::{screen::ScreenCoord, Cursor};
 
         const BOX_MODIFIER: char = '\u{20DE}';
         const UNDERLINE_MODIFIER: char = '\u{0332}';
@@ -183,6 +184,11 @@ impl BufferView {
     }
 
     pub fn draw_code(&self, buffer: &mut SubScreen) {
+        // Fill the whole area first so this view fully owns its own
+        // background, even where its content doesn't have enough lines to
+        // cover every cell itself (e.g. a short file, or a popup's content).
+        buffer.fill(StyledContent::new(self.background, Grapheme::space()));
+
         let rope = self.buffer.rope.blocking_read();
 
         // The number of chars needed for the raw number + 2 for the `| `
@@ -216,7 +222,7 @@ impl BufferView {
                     line: line_idx as u16,
                     column: i as u16,
                 };
-                buffer[coord] = StyledContent::new(ContentStyle::new(), c.into());
+                buffer[coord] = StyledContent::new(self.background, c.into());
             }
             for (i, g) in RopeGraphemes::new(&line)
                 .enumerate()
@@ -233,7 +239,7 @@ impl BufferView {
                             line: line_idx as u16,
                             column: i as u16,
                         };
-                        buffer[coord] = StyledContent::new(ContentStyle::new(), Grapheme::space());
+                        buffer[coord] = StyledContent::new(self.background, Grapheme::space());
                     }
                     break;
                 }
@@ -243,7 +249,7 @@ impl BufferView {
                     column: i as u16,
                 };
 
-                buffer[coord] = StyledContent::new(ContentStyle::new(), g.into());
+                buffer[coord] = StyledContent::new(self.background, g.into());
             }
         }
     }
@@ -272,7 +278,7 @@ pub mod test {
     use ropey::Rope;
     use tokio::sync::RwLock;
 
-    use crate::{Cursor, screen::screen_buffer::ScreenBuffer};
+    use crate::{screen::screen_buffer::ScreenBuffer, Cursor};
 
     use super::*;
 
@@ -300,6 +306,7 @@ pub mod test {
                 rope: RwLock::new(Rope::from_str(std::include_str!("test_document.txt"))),
             }),
             active: true,
+            background: ContentStyle::new(),
         };
         let buffer = ScreenBuffer::new(height as u16, width as u16);
         (buffer, view)

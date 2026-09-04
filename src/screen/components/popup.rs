@@ -1,11 +1,10 @@
-use crossterm::style::{ContentStyle, StyledContent, Stylize};
 use jiff::{SignedDuration, Timestamp};
 
 use crate::{
     screen::{
         animation::{ease_out_cubic, OneShotAnimation},
         component::Component,
-        screen_buffer::{Grapheme, SubScreen},
+        screen_buffer::SubScreen,
         view::buffer_view::BufferView,
         ScreenArea, ScreenCoord,
     },
@@ -123,13 +122,6 @@ impl Component for Popup {
         let area = ScreenArea::new(top_left, bottom_right);
         let mut popup_screen = screen.sub_screen(area);
 
-        // Fill the whole area first so the popup fully hides whatever was
-        // drawn behind it, even where its content doesn't have enough lines
-        // to cover every cell itself.
-        popup_screen.fill(StyledContent::new(
-            ContentStyle::new().on_dark_grey().white(),
-            Grapheme::space(),
-        ));
         self.content.draw_code(&mut popup_screen);
     }
 
@@ -148,9 +140,12 @@ impl Component for Popup {
 mod test {
     use std::sync::Arc;
 
+    use crossterm::style::{ContentStyle, StyledContent};
     use insta::assert_snapshot;
     use ropey::Rope;
     use tokio::sync::RwLock;
+
+    use crate::screen::screen_buffer::Grapheme;
 
     use super::*;
     use crate::{screen::screen_buffer::ScreenBuffer, server::Buffer, Selection};
@@ -175,6 +170,7 @@ mod test {
                 path: None,
                 rope: RwLock::new(Rope::from_str(text)),
             }),
+            background: ContentStyle::new(),
         }
     }
 

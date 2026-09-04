@@ -1,9 +1,12 @@
-use crossterm::{ExecutableCommand, QueueableCommand, cursor::SetCursorStyle};
+use crossterm::{
+    cursor::SetCursorStyle,
+    style::{ContentStyle, Stylize},
+    ExecutableCommand, QueueableCommand,
+};
 use jiff::{SignedDuration, Timestamp};
 use std::io;
 
 use crate::{
-    ActionResult, GlobalContext, Selection, SelectionMode,
     action::{Anchor, DeleteDirection, Direction},
     screen::{
         component::Component,
@@ -12,6 +15,7 @@ use crate::{
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
+    ActionResult, GlobalContext, Selection, SelectionMode,
 };
 use config::Config;
 
@@ -56,6 +60,7 @@ impl Screen {
                 selection: Selection::default(),
                 active: true,
                 buffer,
+                background: ContentStyle::new(),
             },
             buffer: ScreenBuffer::new(row, col),
             popups: Vec::new(),
@@ -96,7 +101,11 @@ impl Screen {
     }
 
     pub fn next_wakeup(&self, now: jiff::Timestamp) -> Option<Timestamp> {
-        let popups_wakeup = self.popups.iter().filter_map(|popup| popup.next_wakeup(now)).min();
+        let popups_wakeup = self
+            .popups
+            .iter()
+            .filter_map(|popup| popup.next_wakeup(now))
+            .min();
         [self.status_bar.next_wakeup(now), popups_wakeup]
             .into_iter()
             .flatten()
@@ -139,6 +148,9 @@ impl Screen {
             active: false,
             selection: Selection::default(),
             buffer,
+            // The popup owns its own background: fill it with a distinct
+            // color so it reads as an overlay on top of the code behind it.
+            background: ContentStyle::new().on_dark_grey().white(),
         };
         self.popups.push(Popup::new(
             PopupPosition::Bottom,
