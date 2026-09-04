@@ -1,8 +1,4 @@
-use crossterm::{
-    cursor::SetCursorStyle,
-    style::{ContentStyle, Stylize},
-    ExecutableCommand, QueueableCommand,
-};
+use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
 use jiff::{SignedDuration, Timestamp};
 use std::io;
 
@@ -60,7 +56,7 @@ impl Screen {
                 selection: Selection::default(),
                 active: true,
                 buffer,
-                background: ContentStyle::new(),
+                background: config.get_theme().ui.background.to_content_style(),
             },
             buffer: ScreenBuffer::new(row, col),
             popups: Vec::new(),
@@ -96,7 +92,7 @@ impl Screen {
             !popup.is_closed(now)
         });
 
-        self.buffer.display_on_screen(&mut self.stdout).unwrap();
+        self.buffer.draw_on_screen(&mut self.stdout).unwrap();
         ActionResult::Nothing
     }
 
@@ -130,7 +126,7 @@ impl Screen {
     }
 
     /// Opens a new popup, unless one is already open, in which case it closes it instead.
-    pub fn open_popup(&mut self, now: Timestamp) -> ActionResult {
+    pub fn open_popup(&mut self, now: Timestamp, ctx: &GlobalContext) -> ActionResult {
         if let Some(popup) = self.popups.last_mut() {
             if !popup.is_closing() {
                 popup.close(now);
@@ -150,7 +146,7 @@ impl Screen {
             buffer,
             // The popup owns its own background: fill it with a distinct
             // color so it reads as an overlay on top of the code behind it.
-            background: ContentStyle::new().on_dark_grey().white(),
+            background: ctx.config.get_theme().ui.popup.to_content_style(),
         };
         self.popups.push(Popup::new(
             PopupPosition::Bottom,

@@ -1,4 +1,4 @@
-use crossterm::style::{ContentStyle, StyledContent, Stylize};
+use crossterm::style::StyledContent;
 use jiff::Timestamp;
 
 use crate::{
@@ -34,7 +34,7 @@ enum StatusBarPosition {
 impl StatusBar {
     pub fn new(config: &Config) -> Self {
         let mut mode = FixedSizeText::new(MODE_WIDTH, FixedSizeTextOverflow::Animate, config);
-        mode.set_style(ContentStyle::new().on_dark_grey().white());
+        mode.set_style(config.get_theme().ui.status_bar.to_content_style());
 
         Self {
             position: StatusBarPosition::default(),
@@ -50,7 +50,7 @@ impl StatusBar {
     ) -> SubScreen<'b> {
         let (remaining, mut status_bar) = screen.split_after_col(screen.height() - 1);
         status_bar.fill(StyledContent::new(
-            ContentStyle::new().on_dark_grey().white(),
+            ctx.config.get_theme().ui.status_bar.to_content_style(),
             Grapheme::space(),
         ));
 

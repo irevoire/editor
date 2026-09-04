@@ -1,0 +1,16 @@
+status_bar {
+    animation_speed 500
+}
+
+theme {
+    ui {
+        status_bar {
+            fg "white"
+            bg "dark_grey"
+        }
+        popup {
+            fg "white"
+            bg "dark_grey"
+        }
+    }
+}

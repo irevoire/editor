@@ -1,0 +1,31 @@
+// A theme bundled into the editor binary, usable from a config file by name:
+//
+//   theme "monokai"
+//
+// A theme that isn't built in is instead loaded from `{config_dir}/theme/`,
+// e.g. a `theme "foo.kdl"` entry loads `{config_dir}/theme/foo.kdl`.
+//
+// Palette entries are just names local to this file — the editor doesn't
+// treat "bg"/"fg" specially, they're only referenced below because we chose
+// to name them that.
+palette {
+    bg        "#272822"
+    fg        "#f8f8f2"
+    selection "#49483e"
+    comment   "#75715e"
+}
+
+ui {
+    background {
+        fg "fg"
+        bg "bg"
+    }
+    status_bar {
+        fg "fg"
+        bg "selection"
+    }
+    popup {
+        fg "fg"
+        bg "selection"
+    }
+}

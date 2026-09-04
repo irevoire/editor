@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 config-macros = { workspace = true }
+crossterm = { workspace = true }
+include_dir = { workspace = true }
 jiff = { workspace = true }
 kdl = { workspace = true }
 log = { workspace = true }
