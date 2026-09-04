@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fmt,
     io::{self, Write},
     marker::PhantomData,
@@ -6,9 +7,9 @@ use std::{
 };
 
 use crossterm::{
-    QueueableCommand,
     cursor::MoveTo,
     style::{ContentStyle, PrintStyledContent, StyledContent},
+    QueueableCommand,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -125,6 +126,19 @@ struct Graphemes<'a> {
     inner: unicode_segmentation::Graphemes<'a>,
 }
 
+/// A single cell of the screen: a grapheme and it's style.
+type Cell = StyledContent<Grapheme>;
+
+/// Useful for the self-referencial `pending` copy of the `committed` data.
+///
+/// # Safety
+/// The result must live as long as the input, and the input must not be modified or moved.
+unsafe fn borrow_committed_as_static(cell: &Cell) -> Cow<'static, Cell> {
+    // SAFETY: same as above
+    let ptr: *const Cell = cell;
+    Cow::Borrowed(unsafe { &*ptr })
+}
+
 /// Represents everything that is currently on the screen, or that will be printed.
 /// It's an abstraction over direct calls to help with tests, debugging, and avoiding doing useless
 /// syscalls when it's not needed.
@@ -136,12 +150,23 @@ struct Graphemes<'a> {
 pub struct ScreenBuffer {
     area: ScreenArea,
     cursor: ScreenCoord,
-    buffer: Vec<StyledContent<Grapheme>>,
+    committed: Box<[Cell]>,
+    pending: Box<[Cow<'static, Cell>]>,
+}
+
+fn blank_cell() -> Cell {
+    StyledContent::new(ContentStyle::new(), Grapheme::from(" "))
 }
 
 impl ScreenBuffer {
     pub fn new(lines: u16, columns: u16) -> Self {
-        let c = StyledContent::new(ContentStyle::new(), Grapheme::from(" "));
+        let committed: Box<[Cell]> =
+            vec![blank_cell(); (lines * columns) as usize].into_boxed_slice();
+        let pending: Box<[Cow<'static, Cell>]> = committed
+            .iter()
+            .map(|cell| unsafe { borrow_committed_as_static(cell) })
+            .collect();
+
         Self {
             area: ScreenArea::new(
                 ScreenCoord::zero(),
@@ -152,8 +177,52 @@ impl ScreenBuffer {
                 },
             ),
             cursor: ScreenCoord::zero(),
-            buffer: vec![c; (lines * columns) as usize],
+            committed,
+            pending,
         }
+    }
+
+    /// Resizes the screen discarding the previous content entirely.
+    /// You should redraw everything before displaying again to the screen.
+    ///
+    /// Neither `Box<[_]>` supports resizing directly, so both are round-tripped through a `Vec`
+    /// — reusing each one's existing heap allocation whenever the new size fits within it — and
+    /// converted back to a `Box` once resized.
+    pub fn resize(&mut self, lines: u16, columns: u16) -> io::Result<()> {
+        // Since `Box<[_]>` don't support resizing and we still want to re-use the allocation, we're
+        // going to extract the allocations. Create a vec, resize it, and store everything back as a `Box<[_]>`.
+        // SAFETY: Also, for safety we HAVE to clear the pending vec so we don't keep any dangling ref to committed.
+        // Before doing that we want to store the latest changes into `committed` using `draw_on_screen` but not
+        // on stdout as it was already resized.
+        self.draw_on_screen(&mut std::io::sink())?;
+        let mut pending: Vec<Cow<'static, Cell>> = std::mem::take(&mut self.pending).into();
+        pending.clear();
+
+        let mut committed: Vec<Cell> = std::mem::take(&mut self.committed).into();
+        committed.clear();
+        committed.resize((lines * columns) as usize, blank_cell());
+        self.committed = committed.into_boxed_slice();
+
+        pending.extend(
+            self.committed
+                .iter()
+                .map(|cell| unsafe { borrow_committed_as_static(cell) }),
+        );
+        self.pending = pending.into_boxed_slice();
+
+        self.area = ScreenArea::new(
+            ScreenCoord::zero(),
+            ScreenCoord {
+                line: lines - 1,
+                column: columns - 1,
+            },
+        );
+        self.cursor = ScreenCoord {
+            line: self.cursor.line.min(lines - 1),
+            column: self.cursor.column.min(columns - 1),
+        };
+
+        Ok(())
     }
 
     pub fn height(&self) -> u16 {
@@ -166,11 +235,12 @@ impl ScreenBuffer {
 
     pub fn display_as_text(&self) -> String {
         let mut output = String::new();
-        for (idx, c) in self.buffer.iter().enumerate() {
+        for (idx, cow) in self.pending.iter().enumerate() {
             let idx = idx as u16;
             if idx != 0 && idx % self.width() == 0 {
                 output.push('\n');
             }
+            let c: &Cell = cow;
             if c.content().is_empty() {
                 output.push(' ');
             } else {
@@ -180,17 +250,29 @@ impl ScreenBuffer {
         output
     }
 
-    pub fn display_on_screen(&self, stdout: &mut io::Stdout) -> io::Result<()> {
-        stdout.queue(MoveTo(0, 0))?;
-        let mut line = 0;
-        for (idx, content) in self.buffer.iter().enumerate() {
-            let idx = idx as u16;
-            if idx != 0 && idx % self.width() == 0 {
-                line += 1;
-                stdout.queue(MoveTo(0, line))?;
+    /// Draws cells that changed since last call.
+    pub fn draw_on_screen(&mut self, stdout: &mut impl Write) -> io::Result<()> {
+        let width = self.width();
+        for idx in 0..self.pending.len() {
+            let Cow::Owned(new_content) =
+                std::mem::replace(&mut self.pending[idx], Cow::Owned(blank_cell()))
+            else {
+                // Nothing was written to this cell since the last draw.
+                continue;
+            };
+
+            // If the content was updated but is still pointing to the same data, we don't need
+            // to draw anything on screen.
+            if new_content != self.committed[idx] {
+                let idx = idx as u16;
+                stdout.queue(MoveTo(idx % width, idx / width))?;
+                stdout.queue(PrintStyledContent(new_content.clone()))?;
+                // SAFETY: It's safe to update committed since we replaced pending by an empty cell above.
+                self.committed[idx as usize] = new_content.clone();
             }
 
-            stdout.queue(PrintStyledContent(content.clone()))?;
+            // SAFETY: Safe to put back a pointer to commited are we're not going to update it anymore.
+            self.pending[idx] = unsafe { borrow_committed_as_static(&self.committed[idx]) };
         }
         stdout.queue(MoveTo(self.cursor.column as u16, self.cursor.line as u16))?;
         stdout.flush()
@@ -200,8 +282,9 @@ impl ScreenBuffer {
         if coord.line >= self.area.height() || coord.column >= self.area.width() {
             None
         } else {
-            self.buffer
+            self.pending
                 .get((coord.line * self.area.width() + coord.column) as usize)
+                .map(|cow| &**cow)
         }
     }
 
@@ -209,9 +292,18 @@ impl ScreenBuffer {
         if coord.line >= self.area.height() || coord.column >= self.area.width() {
             None
         } else {
-            self.buffer
+            self.pending
                 .get_mut((coord.line * self.area.width() + coord.column) as usize)
+                .map(Cow::to_mut)
         }
+    }
+
+    /// Returns `true` if the cell at `coord` was written since the last call to
+    /// `display_on_screen` (i.e. hasn't been drawn to the real terminal yet).
+    #[cfg(test)]
+    fn is_dirty(&self, coord: ScreenCoord) -> bool {
+        let idx = (coord.line * self.area.width() + coord.column) as usize;
+        matches!(self.pending[idx], Cow::Owned(_))
     }
 
     /// Convert the `ScreenBuffer` to a `SubScreen` covering the whole screen.
@@ -764,5 +856,101 @@ mod test {
     fn split_line_cant_create_empty_screen_max() {
         let mut screen = ScreenBuffer::new(10, 10);
         let _sub = screen.as_sub_screen().split_after_line(10);
+    }
+
+    #[test]
+    fn fresh_buffer_has_no_dirty_cells() {
+        let screen = ScreenBuffer::new(10, 10);
+        let area = ScreenArea::new(ScreenCoord::zero(), ScreenCoord { line: 9, column: 9 });
+        for coord in area.iter() {
+            assert!(!screen.is_dirty(coord));
+        }
+    }
+
+    #[test]
+    fn writing_a_cell_marks_it_dirty() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        let coord = ScreenCoord { line: 3, column: 4 };
+        assert!(!screen.is_dirty(coord));
+
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'x'.into());
+
+        assert!(screen.is_dirty(coord));
+        // Other cells are untouched.
+        assert!(!screen.is_dirty(ScreenCoord { line: 3, column: 5 }));
+    }
+
+    #[test]
+    fn display_on_screen_commits_and_clears_dirty_cells() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        let coord = ScreenCoord { line: 3, column: 4 };
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'x'.into());
+        assert!(screen.is_dirty(coord));
+
+        screen.draw_on_screen(&mut io::stdout()).unwrap();
+
+        assert!(!screen.is_dirty(coord));
+        assert_eq!(screen[coord].content(), &Grapheme::from('x'));
+    }
+
+    #[test]
+    fn overwriting_a_cell_multiple_times_before_drawing_only_keeps_the_last_write() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        let coord = ScreenCoord { line: 1, column: 1 };
+
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'a'.into());
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'b'.into());
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'c'.into());
+
+        screen.draw_on_screen(&mut io::stdout()).unwrap();
+
+        assert!(!screen.is_dirty(coord));
+        assert_eq!(screen[coord].content(), &Grapheme::from('c'));
+    }
+
+    #[test]
+    fn rewriting_a_cell_to_its_committed_value_is_not_dirty_after_drawing() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        let coord = ScreenCoord { line: 2, column: 2 };
+        let space = StyledContent::new(ContentStyle::new(), Grapheme::space());
+
+        // The cell already holds a space by default; writing it again doesn't change what's
+        // committed, but the write still marks it dirty until the next draw cleans it up.
+        screen[coord] = space.clone();
+        assert!(screen.is_dirty(coord));
+
+        screen.draw_on_screen(&mut io::stdout()).unwrap();
+
+        assert!(!screen.is_dirty(coord));
+    }
+
+    #[test]
+    fn resize_changes_dimensions_and_discards_old_content() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        screen[ScreenCoord { line: 0, column: 0 }] =
+            StyledContent::new(ContentStyle::new(), 'x'.into());
+        screen.draw_on_screen(&mut io::sink()).unwrap();
+
+        assert_snapshot!(screen.display_as_text(), @"x");
+
+        screen.resize(5, 20).unwrap();
+
+        assert_eq!(screen.height(), 5);
+        assert_eq!(screen.width(), 20);
+        assert_snapshot!(screen.display_as_text(), @"");
+    }
+
+    #[test]
+    fn resize_flushes_pending_writes_before_discarding_them() {
+        let mut screen = ScreenBuffer::new(10, 10);
+        let coord = ScreenCoord { line: 1, column: 1 };
+        // Write a cell but never draw it before resizing.
+        screen[coord] = StyledContent::new(ContentStyle::new(), 'x'.into());
+        assert!(screen.is_dirty(coord));
+
+        // miri should see any dangling ref at this point.
+        screen.resize(10, 10).unwrap();
+
+        assert!(!screen.is_dirty(coord));
     }
 }
