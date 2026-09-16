@@ -106,14 +106,27 @@ impl BufferView {
             {
                 return ActionResult::Nothing;
             }
+            DeleteDirection::Left if self.selection.head.column == 0 => {
+                // At the beginning of a line we find the previous one and remove
+                // its \n.
+                let prev_line_start = rope.line_to_char(self.selection.head.line - 1);
+                let current_line_start = rope.line_to_char(self.selection.head.line);
+                let newline_char = current_line_start - 1;
+                debug_assert_eq!(rope.get_slice(newline_char..=newline_char).unwrap(), "\n");
+                rope.remove(newline_char..=newline_char);
+
+                self.selection.head.line -= 1;
+                self.selection.head.column = newline_char - prev_line_start;
+            }
             DeleteDirection::Left => {
-                self.selection.head.column = self.selection.head.column.saturating_sub(1);
+                self.selection.head.column -= 1;
+                let offset = rope.line_to_char(self.selection.head.line);
+                let remove_char = offset + self.selection.head.column;
+                rope.remove(remove_char..=remove_char);
             }
             DeleteDirection::Right => todo!(),
         };
-        let offset = rope.line_to_char(self.selection.head.line);
-        let remove_char = offset + self.selection.head.column;
-        rope.remove(remove_char..=remove_char);
+        self.selection.tail = self.selection.head;
         ActionResult::Redraw
     }
 
@@ -340,11 +353,23 @@ pub mod test {
     fn insert_newline_moves_cursor_to_next_line() {
         let (mut buffer, mut view) = setup_buffer_view();
 
-        assert_eq!(view.selection.head, Cursor { line: 250, column: 0 });
+        assert_eq!(
+            view.selection.head,
+            Cursor {
+                line: 250,
+                column: 0
+            }
+        );
 
         view.insert('\n');
 
-        assert_eq!(view.selection.head, Cursor { line: 251, column: 0 });
+        assert_eq!(
+            view.selection.head,
+            Cursor {
+                line: 251,
+                column: 0
+            }
+        );
         assert_snapshot!(view.draw_and_display(&mut buffer), @"
         248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
         249|                                                                                                          
@@ -356,6 +381,73 @@ pub mod test {
         255| 1. Abolition of property in land and application of all rents of land to public purposes.                
         256| 2. A heavy progressive or graduated income tax.                                                          
         257| 3. Abolition of all rights of inheritance.
+        ");
+    }
+
+    #[test]
+    fn delete_at_start_of_file_does_nothing() {
+        let (_buffer, mut view) = setup_buffer_view();
+        view.move_anchor(Anchor::Head, Direction::StartOfFile, SelectionMode::Char);
+        assert_eq!(view.selection.head, Cursor { line: 0, column: 0 });
+
+        let content_before = view.buffer.rope.blocking_read().to_string();
+
+        let result = view.delete(DeleteDirection::Left);
+
+        assert!(matches!(result, ActionResult::Nothing));
+        assert_eq!(view.selection.head, Cursor { line: 0, column: 0 });
+        assert_eq!(view.buffer.rope.blocking_read().to_string(), content_before);
+    }
+
+    #[test]
+    fn delete_at_start_of_line_joins_with_previous_line() {
+        let (mut buffer, mut view) = setup_buffer_view();
+
+        // The cursor starts at the beginning of the (blank) line 250, right
+        // after the blank line 249.
+        assert_eq!(
+            view.selection.head,
+            Cursor {
+                line: 250,
+                column: 0
+            }
+        );
+
+        assert_snapshot!(view.draw_and_display(&mut buffer), @"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|                                                                                                          
+        250| T⃞hese measures will, of course, be different in different countries.                                     
+        251|                                                                                                          
+        252| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        253|                                                                                                          
+        254| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        255| 2. A heavy progressive or graduated income tax.                                                          
+        256| 3. Abolition of all rights of inheritance.                                                               
+        257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+
+        view.delete(DeleteDirection::Left);
+
+        // The blank line 249 had no characters of its own, so joining with
+        // it leaves the cursor at its former (empty) start.
+        assert_eq!(
+            view.selection.head,
+            Cursor {
+                line: 249,
+                column: 0
+            }
+        );
+        assert_snapshot!(view.draw_and_display(&mut buffer), @"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249| T⃞hese measures will, of course, be different in different countries.                                     
+        250|                                                                                                          
+        251| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        252|                                                                                                          
+        253| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        254| 2. A heavy progressive or graduated income tax.                                                          
+        255| 3. Abolition of all rights of inheritance.                                                               
+        256| 4. Confiscation of the property of all emigrants and rebels.                                             
+        257| 5. Centralisation of credit in the hands of the state, by means of a national bank with State capital and
         ");
     }
 
