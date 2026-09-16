@@ -66,7 +66,7 @@ fn main() {
     println!("{logs}");
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cursor {
     line: usize,
     column: usize,

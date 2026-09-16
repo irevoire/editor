@@ -88,7 +88,13 @@ impl BufferView {
         let offset = rope.line_to_char(self.selection.head.line);
         let insert_at_char = offset + self.selection.head.column;
         rope.insert_char(insert_at_char, c);
-        self.selection.head.column += 1;
+        if c == '\n' {
+            self.selection.head.line += 1;
+            self.selection.head.column = 0;
+        } else {
+            self.selection.head.column += 1;
+        }
+        self.selection.tail = self.selection.head;
         ActionResult::Redraw
     }
 
@@ -327,6 +333,29 @@ pub mod test {
         255| 2. A heavy progressive or graduated income tax.                                                          
         256| 3. Abolition of all rights of inheritance.                                                               
         257| 4. Confiscation of the property of all emigrants and rebels.
+        ");
+    }
+
+    #[test]
+    fn insert_newline_moves_cursor_to_next_line() {
+        let (mut buffer, mut view) = setup_buffer_view();
+
+        assert_eq!(view.selection.head, Cursor { line: 250, column: 0 });
+
+        view.insert('\n');
+
+        assert_eq!(view.selection.head, Cursor { line: 251, column: 0 });
+        assert_snapshot!(view.draw_and_display(&mut buffer), @"
+        248| Of course, in the beginning, this cannot be effected except by means of despotic inroads on the rights of
+        249|                                                                                                          
+        250|                                                                                                          
+        251| T⃞hese measures will, of course, be different in different countries.                                     
+        252|                                                                                                          
+        253| Nevertheless, in most advanced countries, the following will be pretty generally applicable.             
+        254|                                                                                                          
+        255| 1. Abolition of property in land and application of all rents of land to public purposes.                
+        256| 2. A heavy progressive or graduated income tax.                                                          
+        257| 3. Abolition of all rights of inheritance.
         ");
     }
 
