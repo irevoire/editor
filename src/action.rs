@@ -17,6 +17,8 @@ pub enum Action {
     Insert(char),
     Delete(DeleteDirection),
     OpenPopup,
+    /// The terminal was resized to `(columns, rows)`.
+    Resize(u16, u16),
 }
 
 /// Where a [`Action::Paste`] should read its content from.
@@ -125,6 +127,9 @@ pub enum ActionParseErrorKind {
 
     #[error("invalid escape sequence `\\{found}`")]
     InvalidEscape { found: char },
+
+    #[error("expected an integer, found `{found}`")]
+    InvalidInteger { found: String },
 
     #[error("trailing input after complete action")]
     TrailingInput,
@@ -271,6 +276,25 @@ impl<'a> Cursor<'a> {
         Ok((value, self.span_since(start)))
     }
 
+    /// Consumes an unsigned 16-bit integer literal (e.g. `80`). Skips
+    /// leading whitespace.
+    fn parse_u16_literal(&mut self) -> Result<(u16, Span), ActionParseError> {
+        self.skip_whitespace();
+        let start = self.pos;
+        while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+            self.advance();
+        }
+        let text = &self.input[start..self.pos];
+        text.parse::<u16>()
+            .map(|value| (value, self.span_since(start)))
+            .map_err(|_| ActionParseError {
+                span: self.span_since(start),
+                kind: ActionParseErrorKind::InvalidInteger {
+                    found: text.to_string(),
+                },
+            })
+    }
+
     /// Consumes a `"..."` string literal. Does not skip leading whitespace —
     /// whitespace before a literal is not permitted.
     fn parse_string_literal(&mut self) -> Result<(String, Span), ActionParseError> {
@@ -415,6 +439,14 @@ fn parse_action(cursor: &mut Cursor) -> Result<Action, ActionParseError> {
             cursor.expect_char(')')?;
             Ok(Action::MoveAnchor(anchor, direction))
         }
+        "Resize" => {
+            cursor.expect_char('(')?;
+            let (columns, _) = cursor.parse_u16_literal()?;
+            cursor.expect_char(',')?;
+            let (rows, _) = cursor.parse_u16_literal()?;
+            cursor.expect_char(')')?;
+            Ok(Action::Resize(columns, rows))
+        }
         _ => Err(ActionParseError {
             span: ident_span,
             kind: ActionParseErrorKind::UnknownAction {
@@ -522,6 +554,11 @@ mod test {
     }
 
     #[test]
+    fn parses_resize() {
+        assert_eq!("Resize(80, 24)".parse(), Ok(Action::Resize(80, 24)));
+    }
+
+    #[test]
     fn tolerates_whitespace() {
         assert_eq!(
             "  ChangeMode ( Insert ) ".parse(),
@@ -584,7 +621,7 @@ mod test {
         let err = input.parse::<Action>().unwrap_err();
         assert_snapshot!(err.render(input), @"
         Cuit
-        ^^^^ unknown action `Cuit`, expected one of: Quit, FocusGained, FocusLost, Redraw, PasteRawString, Paste, ChangeMode, MoveAnchor, Insert, Delete, OpenPopup
+        ^^^^ unknown action `Cuit`, expected one of: Quit, FocusGained, FocusLost, Redraw, PasteRawString, Paste, ChangeMode, MoveAnchor, Insert, Delete, OpenPopup, Resize
         ");
     }
 

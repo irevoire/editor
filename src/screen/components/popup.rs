@@ -171,6 +171,7 @@ mod test {
                 rope: RwLock::new(Rope::from_str(text)),
             }),
             background: ContentStyle::new(),
+            soft_wrap: false,
         }
     }
 

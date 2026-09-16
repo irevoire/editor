@@ -182,6 +182,12 @@ impl ScreenBuffer {
         }
     }
 
+    /// The screen coordinate the terminal cursor is currently set to.
+    #[cfg(test)]
+    pub fn cursor(&self) -> ScreenCoord {
+        self.cursor
+    }
+
     /// Resizes the screen discarding the previous content entirely.
     /// You should redraw everything before displaying again to the screen.
     ///

@@ -28,6 +28,11 @@ pub use geo::*;
 /// TODO: make this configurable.
 const POPUP_ANIMATION_DURATION: SignedDuration = SignedDuration::from_millis(200);
 
+/// Rows reserved for the tab line at the top of the screen.
+const TAB_HEIGHT: u16 = 1;
+/// Rows reserved for the status bar at the bottom of the screen.
+const STATUS_HEIGHT: u16 = 1;
+
 pub struct Screen {
     stdout: io::Stdout,
     buffer: ScreenBuffer,
@@ -57,6 +62,7 @@ impl Screen {
                 active: true,
                 buffer,
                 background: config.get_theme().ui.background.to_content_style(),
+                soft_wrap: config.get_soft_wrap(),
             },
             buffer: ScreenBuffer::new(row, col),
             popups: Vec::new(),
@@ -78,11 +84,21 @@ impl Screen {
         ActionResult::Nothing
     }
 
+    /// Splits the full screen area into it's three component in the following order:
+    /// - tab line: A single line representing the tabs name: TODO: not sure we'll keep taht in the future
+    /// - code: The main part of the screen. As big as possible.
+    /// - status bar: A two line area at the bottom of the screen useful to display the status of the editor
+    fn layout(area: ScreenArea) -> (ScreenArea, ScreenArea, ScreenArea) {
+        let (tab, rem) = area.split_after_internal_line(TAB_HEIGHT - 1);
+        let (code, status) = rem.split_after_internal_line(rem.height() - STATUS_HEIGHT - 1);
+        (tab, code, status)
+    }
+
     pub fn draw(&mut self, now: Timestamp, ctx: &GlobalContext) -> ActionResult {
         let mut sub_screen = self.buffer.as_sub_screen();
 
-        let (mut tab_view, mut rem) = sub_screen.split_after_line(0);
-        let (mut code, status) = rem.split_after_line(rem.height() - 2);
+        let (mut tab_view, mut rem) = sub_screen.split_after_line(TAB_HEIGHT - 1);
+        let (mut code, status) = rem.split_after_line(rem.height() - STATUS_HEIGHT - 1);
         self.status_bar.draw(now, &ctx, status);
 
         self.view.draw_tab(&mut tab_view);
@@ -94,6 +110,25 @@ impl Screen {
 
         self.buffer.draw_on_screen(&mut self.stdout).unwrap();
         ActionResult::Nothing
+    }
+
+    /// Called when the terminal is resized.
+    /// Resize the internal buffer and all the components that needs to be resized.
+    pub fn resize(&mut self, columns: u16, lines: u16) -> ActionResult {
+        self.buffer.resize(lines, columns).unwrap();
+
+        let area = ScreenArea::new(
+            ScreenCoord::zero(),
+            ScreenCoord {
+                line: lines - 1,
+                column: columns - 1,
+            },
+        );
+        let (_tab, code, _status) = Self::layout(area);
+        self.view
+            .resize(code.width() as usize, code.height() as usize);
+
+        ActionResult::Redraw
     }
 
     pub fn next_wakeup(&self, now: jiff::Timestamp) -> Option<Timestamp> {
@@ -147,6 +182,7 @@ impl Screen {
             // The popup owns its own background: fill it with a distinct
             // color so it reads as an overlay on top of the code behind it.
             background: ctx.config.get_theme().ui.popup.to_content_style(),
+            soft_wrap: ctx.config.get_soft_wrap(),
         };
         self.popups.push(Popup::new(
             PopupPosition::Bottom,
@@ -163,5 +199,31 @@ impl Screen {
         };
         self.stdout.queue(cursor_shape)?;
         Ok(ActionResult::Redraw)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn layout_reserves_the_tab_line_and_status_bar_around_the_code_area() {
+        let area = ScreenArea::new(
+            ScreenCoord::zero(),
+            ScreenCoord {
+                line: 9,
+                column: 19,
+            },
+        );
+        let (tab, code, status) = Screen::layout(area);
+
+        assert_eq!(tab.width(), 20);
+        assert_eq!(tab.height(), TAB_HEIGHT);
+
+        assert_eq!(code.width(), 20);
+        assert_eq!(code.height(), 10 - TAB_HEIGHT - STATUS_HEIGHT);
+
+        assert_eq!(status.width(), 20);
+        assert_eq!(status.height(), STATUS_HEIGHT);
     }
 }

@@ -53,6 +53,7 @@ struct InnerConfig {
 struct ConfigLayer {
     status_bar: StatusBarConfig,
     theme: Option<Theme>,
+    soft_wrap: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ConfigField)]
@@ -77,6 +78,8 @@ pub enum ConfigParseError {
         "`status_bar > animation_speed` must be an integer number of milliseconds, found `{found}`"
     )]
     InvalidAnimationSpeed { found: String },
+    #[error("`soft_wrap` must be a boolean, found `{found}`")]
+    InvalidSoftWrap { found: String },
     #[error(transparent)]
     Theme(#[from] ThemeParseError),
     #[error("could not read theme file `{path}`: {message}")]
@@ -134,6 +137,15 @@ impl ConfigLayer {
 
         if let Some(theme_node) = document.get("theme") {
             config.theme = Some(parse_theme_node(theme_node, base_dir)?);
+        }
+
+        if let Some(value) = document.get_arg("soft_wrap") {
+            let enabled = value
+                .as_bool()
+                .ok_or_else(|| ConfigParseError::InvalidSoftWrap {
+                    found: value.to_string(),
+                })?;
+            config.soft_wrap = Some(enabled);
         }
 
         Ok(config)
@@ -302,6 +314,8 @@ fn global_config_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod test {
+    use insta::assert_debug_snapshot;
+
     use super::*;
 
     #[test]
@@ -400,8 +414,15 @@ mod test {
     #[test]
     fn empty_input_sets_nothing() {
         let layer = ConfigLayer::parse(ConfigSource::Raw("")).unwrap();
-        assert_eq!(layer.status_bar.animation_speed, None);
-        assert_eq!(layer.theme, None);
+        assert_debug_snapshot!(layer, @"
+        ConfigLayer {
+            status_bar: StatusBarConfig {
+                animation_speed: None,
+            },
+            theme: None,
+            soft_wrap: None,
+        }
+        ");
     }
 
     #[test]
@@ -418,6 +439,26 @@ mod test {
             err,
             ConfigError::Parse(ConfigParseError::InvalidAnimationSpeed { .. })
         ));
+    }
+
+    #[test]
+    fn parses_soft_wrap() {
+        let layer = ConfigLayer::parse(ConfigSource::Raw("soft_wrap #true")).unwrap();
+        assert_eq!(layer.soft_wrap, Some(true));
+    }
+
+    #[test]
+    fn rejects_non_boolean_soft_wrap() {
+        let err = ConfigLayer::parse(ConfigSource::Raw(r#"soft_wrap "true""#)).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Parse(ConfigParseError::InvalidSoftWrap { .. })
+        ));
+    }
+
+    #[test]
+    fn soft_wrap_defaults_to_false() {
+        assert!(!Config::default().get_soft_wrap());
     }
 
     #[test]

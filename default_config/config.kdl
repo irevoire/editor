@@ -2,6 +2,8 @@ status_bar {
     animation_speed 500
 }
 
+soft_wrap #false
+
 theme {
     ui {
         status_bar {

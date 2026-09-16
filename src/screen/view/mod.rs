@@ -1,4 +1,4 @@
-use ropey::{RopeSlice, iter::Chunks};
+use ropey::{iter::Chunks, RopeSlice};
 use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 
 pub mod buffer_view;
@@ -68,5 +68,71 @@ impl<'a> Iterator for RopeGraphemes<'a> {
             let b2 = b - self.cur_chunk_start;
             Some((&self.cur_chunk[a2..b2]).into())
         }
+    }
+}
+
+/// Splits a one buffer line fixed-width chunks for soft-wrap.
+/// A trailing `\n` terminate the chunk without being included or counted
+/// in the `content_width`.
+/// Always yields at least one chunk, so an empty line still count as one line.
+pub struct WrapChunks<'a> {
+    graphemes: RopeGraphemes<'a>,
+    content_width: usize,
+    done: bool,
+    started: bool,
+    /// Whether the previously yielded chunk was exactly `content_width`.
+    /// That's helpful to know where the cursor should be drawn next.
+    last_was_full: bool,
+}
+
+impl<'a> WrapChunks<'a> {
+    pub fn new(line: &RopeSlice<'a>, content_width: usize) -> WrapChunks<'a> {
+        WrapChunks {
+            graphemes: RopeGraphemes::new(line),
+            content_width: content_width.max(1),
+            done: false,
+            started: false,
+            last_was_full: false,
+        }
+    }
+}
+
+impl<'a> Iterator for WrapChunks<'a> {
+    type Item = Vec<RopeSlice<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let mut chunk = Vec::with_capacity(self.content_width);
+        for _ in 0..self.content_width {
+            match self.graphemes.next() {
+                Some(g) if g.chars().next() == Some('\n') => {
+                    self.done = true;
+                    self.started = true;
+                    return Some(chunk);
+                }
+                Some(g) => chunk.push(g),
+                None => {
+                    self.done = true;
+                    let was_started = self.started;
+                    let last_was_full = self.last_was_full;
+                    self.started = true;
+                    return if chunk.is_empty() && was_started && !last_was_full {
+                        // The line ended mid-row: no extra blank row.
+                        None
+                    } else {
+                        // Either the line is empty or ended exactly on
+                        // the previous chunk's boundary.
+                        // Either way, a row starts here.
+                        Some(chunk)
+                    };
+                }
+            }
+        }
+        self.started = true;
+        self.last_was_full = true;
+        Some(chunk)
     }
 }

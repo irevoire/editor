@@ -104,6 +104,7 @@ dependencies = [
  "config-macros",
  "crossterm",
  "include_dir",
+ "insta",
  "jiff",
  "kdl",
  "log",

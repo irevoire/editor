@@ -189,6 +189,7 @@ impl Editor {
             Action::Insert(c) => Ok(self.screen.insert(c)),
             Action::Delete(delete_direction) => Ok(self.screen.delete(delete_direction)),
             Action::OpenPopup => Ok(self.screen.open_popup(now, &self.context)),
+            Action::Resize(columns, rows) => Ok(self.screen.resize(columns, rows)),
         }
     }
 
@@ -241,7 +242,7 @@ impl Editor {
             },
             Event::Mouse(mouse_event) => None,
             Event::Paste(content) => Some(Action::PasteRawString(content)),
-            Event::Resize(_, _) => Some(Action::Redraw),
+            Event::Resize(columns, rows) => Some(Action::Resize(columns, rows)),
         }
     }
 
