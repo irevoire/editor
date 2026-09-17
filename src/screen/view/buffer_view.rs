@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crossterm::style::{ContentStyle, StyledContent, Stylize};
 
+use action::{Anchor, DeleteDirection, Direction};
 #[cfg(test)]
 use crate::screen::screen_buffer::ScreenBuffer;
 use crate::{
-    action::{Anchor, DeleteDirection, Direction},
     screen::{
         screen_buffer::{Grapheme, SubScreen},
         view::{RopeGraphemes, WrapChunks},

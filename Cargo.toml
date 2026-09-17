@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+action = { workspace = true }
 config = { workspace = true }
 crossterm = { workspace = true }
 env_logger = { workspace = true }
@@ -11,9 +12,6 @@ jiff = { workspace = true }
 log = { workspace = true }
 oneshot = { workspace = true }
 ropey = { workspace = true }
-strsim = { workspace = true }
-strum = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 unicode-segmentation = { workspace = true }
 
@@ -22,12 +20,13 @@ insta = { workspace = true }
 
 [workspace]
 resolver = "3"
-members = ["crates/config", "crates/config-macros"]
+members = ["crates/action", "crates/config", "crates/config-macros"]
 
 [workspace.package]
 edition = "2024"
 
 [workspace.dependencies]
+action = { path = "crates/action" }
 config = { path = "crates/config" }
 config-macros = { path = "crates/config-macros" }
 

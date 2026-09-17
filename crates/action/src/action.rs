@@ -147,7 +147,10 @@ impl ActionParseErrorKind {
     }
 }
 
-fn did_you_mean(found: &str, candidates: &[&str]) -> Option<String> {
+/// Finds the closest match to `found` among `candidates`, using Jaro-Winkler
+/// similarity. Returns `None` if nothing is close enough to be a useful
+/// suggestion.
+pub fn did_you_mean(found: &str, candidates: &[&str]) -> Option<String> {
     candidates
         .iter()
         .map(|candidate| (*candidate, strsim::jaro_winkler(found, candidate)))

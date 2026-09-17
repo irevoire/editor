@@ -1,0 +1,12 @@
+[package]
+name = "action"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+strsim = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

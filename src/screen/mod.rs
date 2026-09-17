@@ -2,8 +2,8 @@ use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
 use jiff::{SignedDuration, Timestamp};
 use std::io;
 
+use action::{Anchor, DeleteDirection, Direction, Mode};
 use crate::{
-    action::{Anchor, DeleteDirection, Direction},
     screen::{
         component::Component,
         components::{Popup, PopupPosition, StatusBar},
@@ -192,10 +192,10 @@ impl Screen {
         ActionResult::Redraw
     }
 
-    pub fn change_mode(&mut self, mode: crate::Mode) -> io::Result<ActionResult> {
+    pub fn change_mode(&mut self, mode: Mode) -> io::Result<ActionResult> {
         let cursor_shape = match mode {
-            crate::Mode::Normal => SetCursorStyle::DefaultUserShape,
-            crate::Mode::Insert => SetCursorStyle::BlinkingBar,
+            Mode::Normal => SetCursorStyle::DefaultUserShape,
+            Mode::Insert => SetCursorStyle::BlinkingBar,
         };
         self.stdout.queue(cursor_shape)?;
         Ok(ActionResult::Redraw)

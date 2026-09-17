@@ -12,14 +12,13 @@ use std::{
     panic::catch_unwind,
 };
 
+use action::{Action, Anchor, DeleteDirection, Direction, Mode};
 use crate::{
-    action::{Action, Anchor, DeleteDirection, Direction},
     screen::{Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
 use config::Config;
 
-mod action;
 mod screen;
 mod server;
 mod utils;
@@ -99,22 +98,6 @@ impl PartialOrd for Cursor {
 pub struct Selection {
     tail: Cursor,
     head: Cursor,
-}
-
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, strum::VariantNames, strum::EnumString)]
-pub enum Mode {
-    #[default]
-    Normal,
-    Insert,
-}
-
-impl Mode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Mode::Normal => "normal",
-            Mode::Insert => "insert",
-        }
-    }
 }
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
