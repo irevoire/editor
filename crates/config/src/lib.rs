@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
@@ -10,6 +11,12 @@ use include_dir::{include_dir, Dir};
 use jiff::SignedDuration;
 use parking_lot::RwLock;
 use thiserror::Error;
+
+mod keymap;
+pub use keymap::{Keymap, KeymapParseError, Modifier, ModifierKeymap, Row, RowEntry, RowKind};
+
+mod location;
+use location::Location;
 
 mod theme;
 pub use theme::{Style, Theme, ThemeParseError};
@@ -54,6 +61,12 @@ struct ConfigLayer {
     status_bar: StatusBarConfig,
     theme: Option<Theme>,
     soft_wrap: Option<bool>,
+    /// Named keymaps (`keymap "name" { ... }`). Only the one literally named
+    /// `"default"` is ever resolved today; this is a collection rather than
+    /// a scalar `Option<T>`, so `#[derive(ConfigField)]` skips it — it's
+    /// parsed and merged by hand (see `parse_keymap_node` and
+    /// `Config::get_keymap`).
+    keymaps: HashMap<String, Keymap>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ConfigField)]
@@ -84,6 +97,10 @@ pub enum ConfigParseError {
     Theme(#[from] ThemeParseError),
     #[error("could not read theme file `{path}`: {message}")]
     ThemeFileIo { path: String, message: String },
+    #[error(transparent)]
+    Keymap(#[from] KeymapParseError),
+    #[error("`keymap` node is missing a name, e.g. `keymap \"default\" {{ ... }}`")]
+    MissingKeymapName,
 }
 
 /// Where a config layer's `config.kdl` (and its `theme/` directory) come
@@ -120,6 +137,7 @@ impl ConfigLayer {
         let (input, base_dir) = source.load()?;
         let document: kdl::KdlDocument = input.parse().map_err(ConfigParseError::Kdl)?;
         let mut config = ConfigLayer::default();
+        let root = Location::Root;
 
         if let Some(status_bar) = document.get("status_bar") {
             if let Some(children) = status_bar.children() {
@@ -148,7 +166,39 @@ impl ConfigLayer {
             config.soft_wrap = Some(enabled);
         }
 
+        // Unlike `status_bar`/`theme` (each appears at most once), `keymap`
+        // is repeated: `document.get` would only ever find the first one.
+        for node in document
+            .nodes()
+            .iter()
+            .filter(|n| n.name().value() == "keymap")
+        {
+            let name = node
+                .entries()
+                .iter()
+                .find(|e| e.name().is_none())
+                .and_then(|e| e.value().as_string())
+                .ok_or(ConfigParseError::MissingKeymapName)?
+                .to_string();
+            let location = format!("keymap {name:?}");
+            let keymap = parse_keymap_node(node, root.key(&location))?;
+            config.keymaps.insert(name, keymap);
+        }
+
         Ok(config)
+    }
+}
+
+/// Parses a `keymap "name" { ... }` node's body. A bare node with no body
+/// (`keymap "default"`) parses to [`Keymap::default`], mirroring how a bare
+/// `theme` node with no body defaults to an empty theme.
+fn parse_keymap_node(
+    node: &kdl::KdlNode,
+    location: Location<'_>,
+) -> Result<Keymap, ConfigParseError> {
+    match node.children() {
+        Some(children) => Ok(Keymap::parse(children, location)?),
+        None => Ok(Keymap::default()),
     }
 }
 
@@ -233,6 +283,30 @@ impl Config {
     /// Create a new empty config that uses the current config as a base.
     pub fn fork(&self) -> Config {
         self.load_layer(ConfigLayer::default())
+    }
+
+    /// Resolves the named keymap by walking the config chain from the most
+    /// specific layer up to the bundled default. A keymap defined at a more
+    /// specific layer fully replaces the same-named keymap from a less
+    /// specific layer — rows/slots are never deep-merged across layers.
+    /// Returns `None` if no layer in the chain defines a keymap by that
+    /// name (unlike [`InnerConfig::resolve`], which panics, since a keymap
+    /// name isn't guaranteed to exist the way every scalar field is).
+    pub fn get_keymap(&self, name: &str) -> Option<Keymap> {
+        let mut current = &self.0;
+        loop {
+            if let Some(keymap) = current.layer.read().keymaps.get(name) {
+                return Some(keymap.clone());
+            }
+            current = current.parent.as_ref()?;
+        }
+    }
+
+    /// The always-defined `"default"` keymap; the bundled configuration
+    /// guarantees this resolves.
+    pub fn get_default_keymap(&self) -> Keymap {
+        self.get_keymap("default")
+            .expect("default_config/config.kdl must define keymap \"default\"")
     }
 }
 
@@ -421,6 +495,7 @@ mod test {
             },
             theme: None,
             soft_wrap: None,
+            keymaps: {},
         }
         ");
     }
@@ -597,5 +672,88 @@ mod test {
         fs::create_dir_all(&nested).unwrap();
 
         assert_eq!(find_git_root(&nested), None);
+    }
+
+    #[test]
+    fn parses_two_sibling_keymap_blocks_into_the_map() {
+        let layer = ConfigLayer::parse(ConfigSource::Raw(
+            r#"
+            keymap "default" {
+                normal { base { home "Quit" #null #null #null #null #null #null #null #null #null #null #null } }
+            }
+            keymap "arrows-on-home" {
+                layer "default"
+                normal { base { home "MoveAnchor(Head, Left)" #null #null #null #null #null #null #null #null #null #null #null } }
+            }
+            "#,
+        ))
+        .unwrap();
+        assert_eq!(layer.keymaps.len(), 2);
+        assert!(layer.keymaps.contains_key("default"));
+        assert!(layer.keymaps.contains_key("arrows-on-home"));
+        assert_eq!(
+            layer.keymaps["arrows-on-home"].layer,
+            Some("default".to_string())
+        );
+    }
+
+    #[test]
+    fn a_keymap_node_missing_a_name_is_an_error() {
+        let err = ConfigLayer::parse(ConfigSource::Raw(
+            "keymap { normal { base { home \"Quit\" } } }",
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Parse(ConfigParseError::MissingKeymapName)
+        ));
+    }
+
+    #[test]
+    fn a_more_specific_layers_keymap_fully_replaces_the_parents() {
+        let parent = Config::default()
+            .load_raw(
+                r#"
+                keymap "default" {
+                    normal { base { home "Quit" "OpenPopup" #null #null #null #null #null #null #null #null #null #null } }
+                }
+                "#,
+            )
+            .unwrap();
+        let child = parent
+            .load_raw(
+                r#"
+                keymap "default" {
+                    normal { base { home "ChangeMode(Insert)" #null #null #null #null #null #null #null #null #null #null #null } }
+                }
+                "#,
+            )
+            .unwrap();
+
+        // The child's keymap fully replaces the parent's: column 1 (`OpenPopup`
+        // in the parent) is gone entirely, not merged through.
+        let normal = child
+            .get_keymap("default")
+            .unwrap()
+            .modes
+            .remove(&action::Mode::Normal)
+            .unwrap();
+        assert_eq!(
+            normal.resolve(Modifier::Base, RowKind::Home, 0),
+            Some(&action::Action::ChangeMode(action::Mode::Insert))
+        );
+        assert_eq!(normal.resolve(Modifier::Base, RowKind::Home, 1), None);
+    }
+
+    #[test]
+    fn get_keymap_returns_none_for_an_undefined_name() {
+        assert_eq!(Config::default().get_keymap("does-not-exist"), None);
+    }
+
+    #[test]
+    fn the_bundled_default_keymap_resolves_without_panicking() {
+        // Sanity check: `get_default_keymap` panics if `default_config/config.kdl`
+        // doesn't define `keymap "default"`.
+        let _ = Config::default().get_default_keymap();
     }
 }

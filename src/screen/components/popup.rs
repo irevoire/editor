@@ -1,14 +1,14 @@
 use jiff::{SignedDuration, Timestamp};
 
 use crate::{
+    GlobalContext,
     screen::{
-        animation::{ease_out_cubic, OneShotAnimation},
+        ScreenArea, ScreenCoord,
+        animation::{OneShotAnimation, ease_out_cubic},
         component::Component,
         screen_buffer::SubScreen,
         view::buffer_view::BufferView,
-        ScreenArea, ScreenCoord,
     },
-    GlobalContext,
 };
 
 /// The animation redraws at roughly this many frames per second, however
@@ -148,7 +148,7 @@ mod test {
     use crate::screen::screen_buffer::Grapheme;
 
     use super::*;
-    use crate::{screen::screen_buffer::ScreenBuffer, server::Buffer, Selection};
+    use crate::{Selection, screen::screen_buffer::ScreenBuffer, server::Buffer};
 
     /// Fill the whole screen with a recognizable "code" pattern, standing in
     /// for whatever the rest of the editor draws behind the popup.

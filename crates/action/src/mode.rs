@@ -1,6 +1,7 @@
 #[derive(
-    Default, Copy, Clone, Debug, PartialEq, Eq, Hash, strum::VariantNames, strum::EnumString
+    Default, Copy, Clone, Debug, PartialEq, Eq, Hash, strum::VariantNames, strum::EnumString,
 )]
+#[strum(ascii_case_insensitive)]
 pub enum Mode {
     #[default]
     Normal,

@@ -12,6 +12,7 @@ jiff = { workspace = true }
 kdl = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
+strum = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

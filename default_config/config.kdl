@@ -16,3 +16,24 @@ theme {
         }
     }
 }
+
+// A structurally-valid placeholder: today's hardcoded 'q'/'i'/' ' bindings
+// (see `Editor::event_to_action`), ported onto arbitrary physical positions.
+// Nothing consumes this keymap at runtime yet -- actual ergonomic key
+// assignment is a separate, later design pass.
+keymap "default" {
+    normal {
+        base {
+            top    #null #null #null #null #null #null #null #null #null #null #null #null
+            home   "ChangeMode(Insert)" #null #null #null #null "OpenPopup" #null #null #null #null #null "Quit"
+            bottom #null #null #null #null #null #null #null #null #null #null #null #null
+        }
+    }
+    insert {
+        base {
+            top    #null #null #null #null #null #null #null #null #null #null #null #null
+            home   #null #null #null #null #null #null #null #null #null #null #null #null
+            bottom #null #null #null #null #null #null #null #null #null #null #null #null
+        }
+    }
+}

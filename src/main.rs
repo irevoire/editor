@@ -12,11 +12,11 @@ use std::{
     panic::catch_unwind,
 };
 
-use action::{Action, Anchor, DeleteDirection, Direction, Mode};
 use crate::{
     screen::{Screen, ScreenCoord},
     server::{Server, ServerHandle},
 };
+use action::{Action, Anchor, DeleteDirection, Direction, Mode};
 use config::Config;
 
 mod screen;

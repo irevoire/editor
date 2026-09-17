@@ -7,9 +7,9 @@ use std::{
 };
 
 use crossterm::{
+    QueueableCommand,
     cursor::MoveTo,
     style::{ContentStyle, PrintStyledContent, StyledContent},
-    QueueableCommand,
 };
 use unicode_segmentation::UnicodeSegmentation;
 

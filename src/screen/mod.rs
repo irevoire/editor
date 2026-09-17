@@ -1,9 +1,9 @@
-use crossterm::{cursor::SetCursorStyle, ExecutableCommand, QueueableCommand};
+use crossterm::{ExecutableCommand, QueueableCommand, cursor::SetCursorStyle};
 use jiff::{SignedDuration, Timestamp};
 use std::io;
 
-use action::{Anchor, DeleteDirection, Direction, Mode};
 use crate::{
+    ActionResult, GlobalContext, Selection, SelectionMode,
     screen::{
         component::Component,
         components::{Popup, PopupPosition, StatusBar},
@@ -11,8 +11,8 @@ use crate::{
         view::buffer_view::BufferView,
     },
     server::ServerHandle,
-    ActionResult, GlobalContext, Selection, SelectionMode,
 };
+use action::{Anchor, DeleteDirection, Direction, Mode};
 use config::Config;
 
 pub mod animation;

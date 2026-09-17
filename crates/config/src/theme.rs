@@ -60,9 +60,7 @@ impl Theme {
     /// it as a path.
     pub fn built_in(name: &str) -> Option<Theme> {
         let file = crate::DEFAULT_CONFIG_DIR.get_file(format!("theme/{name}.kdl"))?;
-        let source = file
-            .contents_utf8()
-            .expect("built-in themes must be UTF-8");
+        let source = file.contents_utf8().expect("built-in themes must be UTF-8");
         let document: KdlDocument = source.parse().expect("built-in theme must be valid kdl");
         Some(Theme::parse(&document).expect("built-in theme must parse cleanly"))
     }
@@ -256,10 +254,7 @@ mod test {
         let theme = parse("");
         assert_eq!(theme.ui.status_bar.to_content_style(), ContentStyle::new());
         assert_eq!(theme.ui.popup.to_content_style(), ContentStyle::new());
-        assert_eq!(
-            theme.ui.background.to_content_style(),
-            ContentStyle::new()
-        );
+        assert_eq!(theme.ui.background.to_content_style(), ContentStyle::new());
     }
 
     #[test]

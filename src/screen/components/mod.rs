@@ -80,8 +80,8 @@ mod test {
     use insta::assert_snapshot;
     use jiff::ToSpan;
 
-    use action::Mode;
     use crate::screen::screen_buffer::ScreenBuffer;
+    use action::Mode;
 
     use super::*;
 

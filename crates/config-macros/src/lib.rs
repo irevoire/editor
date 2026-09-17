@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
+    Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type, parse_macro_input,
 };
 
 /// Generates typed `get_`/`set_`/`unset_` accessors on `Config` for every
