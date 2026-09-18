@@ -78,10 +78,14 @@ is independently buildable, testable, and committable.
   `MO` momentary).
 - **Modes are generic, not hardcoded**: a keymap's per-mode blocks
   (`normal { ... }`, `insert { ... }`) are matched by parsing the child
-  node's name via `Mode::from_str` (already derived via `strum::EnumString`
-  on `Mode`, `src/main.rs:104-118`) rather than two fixed struct fields. A
-  future `Mode` variant (e.g. `Visual`) becomes configurable with zero
-  parser changes.
+  node's name via `Mode::from_str`. As of Phase 1.5, `Mode`
+  (`crates/action/src/mode.rs`, moved there by Phase 0) is no longer a
+  closed enum at all — it's an open, arbitrary string identifier
+  (`Mode::from_str` is infallible), so a brand new mode name (e.g. `visual`)
+  becomes fully usable from config alone, with zero code changes, not just
+  "zero parser changes". `"normal"`/`"insert"` remain the only names the
+  editor's own Rust code references directly, as bootstrap/fallback entry
+  points (see Phase 1.5, Part C).
 - **Layout presets bundled now**: `qwerty` and `ergo-l` only (the user's two
   personal layouts). More can be added later without schema changes, the
   same way bundled themes work (`default_config/theme/monokai.kdl`).
@@ -285,6 +289,296 @@ and contains the placeholder bindings.
 
 ---
 
+## Phase 1.5 — Self-insert action templates + open-ended `Mode`
+
+**Why this exists / why it's not part of Phase 1**: Phase 1 shipped the keymap schema and
+`ModifierKeymap`/`RowSet` grid, but punted on "insert mode" by placeholder-binding its entire
+grid to `#null` (`default_config/config.kdl`'s `insert { base { ... } }` block). That doesn't
+work: typing needs the actual character produced by a keystroke, which is exactly the thing
+the position/layout grid is designed to *not* care about (see the parent doc's core insight).
+Encoding "type what you typed" as 144 literal `Insert('a')`/`Insert('b')`/... bindings would
+duplicate the entire `Layout` config inside every keymap and break the moment a layout
+changes. So "insert mode" needs a fundamentally different resolution path — a *mode-wide
+fallback template*, not more grid bindings — and while doing that we noticed the mode name
+itself doesn't need to be fixed either. This phase builds both, staying schema/type-level only
+(same scope discipline as Phase 1): buildable and fully unit-testable in `crates/action` and
+`crates/config` without Phase 3's real dispatch existing yet.
+
+### Part A — `$`-hole action templates (`crates/action/src/action.rs`)
+
+Add a second, parallel grammar entry point alongside `Action::from_str`/`parse_action`
+(`crates/action/src/action.rs:387-461`): a **template** parse that mirrors it exactly, except
+wherever a variant's argument is a `char` (today, only `Insert`'s), it may instead be a `$`
+placeholder ("hole"), to be filled in later with the character an actual keystroke produced.
+
+Why a parallel type instead of extending `Action`/`Action::from_str` themselves: `Action`
+needs to stay a plain, fully-resolved value (every existing call site — `Keymap::resolve`,
+`process_action`, tests — assumes a concrete `Action`, no half-filled state). Ordinary grid
+bindings (`RowEntry::Bound(Action)`, parsed via `Action::from_str`) must keep rejecting `$`
+outright — a `#null`/action grid slot needs a literal, always. Only the new `self_insert`
+directive (Part B) is a template.
+
+```rust
+/// One character not yet known: filled in at keystroke-resolution time.
+enum CharOrHole {
+    Char(char),
+    Hole,
+}
+
+/// An `Action` constructor with exactly one `char` argument left as a `$`
+/// hole, e.g. `Insert($)`. Mirrors `Action`, but only lists the variants
+/// that have a char-typed field to hold the hole (today: just `Insert`).
+/// A future variant needing hole-support gets its own arm here, exactly the
+/// same way `Action`'s own per-variant hand-rolled parser already works —
+/// no generic reflection, consistent with this file's existing style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionTemplate {
+    Insert(CharOrHole),
+}
+
+impl ActionTemplate {
+    /// Fills the hole (if any) with `value` and produces a concrete `Action`.
+    /// If the template had a literal char instead of a hole, `value` is
+    /// ignored and that literal is used (this is what lets `self_insert`
+    /// reject a holeless template explicitly at config-parse time instead
+    /// of silently ignoring every keystroke — see Part B).
+    pub fn fill(&self, value: char) -> Action {
+        match self {
+            ActionTemplate::Insert(CharOrHole::Hole) => Action::Insert(value),
+            ActionTemplate::Insert(CharOrHole::Char(c)) => Action::Insert(*c),
+        }
+    }
+
+    pub fn has_hole(&self) -> bool {
+        matches!(self, ActionTemplate::Insert(CharOrHole::Hole))
+    }
+}
+
+impl FromStr for ActionTemplate {
+    type Err = ActionParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> { /* parse_action_template(&mut Cursor::new(s)) + trailing-input check, mirrors `impl FromStr for Action` at action.rs:463-477 */ }
+}
+```
+
+Parsing (`fn parse_action_template(cursor: &mut Cursor) -> Result<ActionTemplate, ActionParseError>`,
+placed right after `parse_action`): parse the ident exactly like `parse_action` does
+(`cursor.parse_ident("an action name")`), then:
+- `"Insert"` → `expect_char('(')`, then a new `Cursor::parse_char_literal_or_hole()` (peek for
+  `'$'`: if present, `advance()` past it and return `CharOrHole::Hole`; else delegate to the
+  existing `parse_char_literal()` and wrap `CharOrHole::Char`), then `expect_char(')')` →
+  `ActionTemplate::Insert(...)`.
+- Any other known ident (`Quit`, `ChangeMode`, `MoveAnchor`, `Delete`, `Resize`, `Paste`,
+  `PasteRawString`, `OpenPopup`, `FocusGained`, `FocusLost`, `Redraw`) → new error variant
+  `ActionParseErrorKind::NotTemplatable { found: String }` (message e.g. `"` `` `{found}` ``
+  `has no argument that can be filled in at keystroke time"`). These variants have no
+  char-typed field, so there's nothing for a hole to fill.
+- Unknown ident → reuse the existing `ActionParseErrorKind::UnknownAction` path.
+
+`$` needs no special-casing to avoid colliding with `parse_ident` (which already treats `_` as
+an identifier character, `action.rs:231` — this is exactly the ambiguity that ruled out `_` as
+the hole token during design). `$` is not in `parse_ident`'s character class and appears
+nowhere else in the grammar, so `cursor.peek() == Some('$')` is unambiguous.
+
+`crates/action/src/lib.rs`: re-export `ActionTemplate` alongside the existing `Action`/`Mode`
+re-exports.
+
+Tests (`crates/action/src/action.rs`'s `mod test`, mirroring its existing insta-snapshot
+style for errors, e.g. `action.rs:611-619`):
+- `ActionTemplate::from_str("Insert($)")` → `has_hole() == true`, `.fill('x') == Action::Insert('x')`.
+- `ActionTemplate::from_str("Insert('a')")` → `has_hole() == false`, `.fill('z') == Action::Insert('a')` (value ignored).
+- `ActionTemplate::from_str("Quit")` → `Err(NotTemplatable { found: "Quit" })`, snapshot the rendered message.
+- Malformed input (`"Insert($"`, missing `)`) reuses the existing `expect_char` error path —
+  add one snapshot test to confirm it composes correctly through the new entry point.
+
+### Part B — `self_insert` keymap directive (`crates/config/src/keymap.rs`)
+
+Add a field to `ModifierKeymap` (it's the per-mode struct despite the name — see the "Loose
+end" note at the bottom of this phase):
+
+```rust
+pub struct ModifierKeymap {
+    pub base: RowSet,
+    pub shifted: RowSet,
+    pub alted: RowSet,
+    pub ctrled: RowSet,
+    /// The action template used for a `KeyCode::Char` in this mode when the
+    /// grid genuinely has no binding at the resolved position (fallback
+    /// only — an explicit grid binding always wins). `None` means "do
+    /// nothing" for an unbound char, same as today's behavior everywhere.
+    pub self_insert: Option<ActionTemplate>,
+}
+```
+
+KDL shape — a plain single-argument node, sibling to `base`/`shifted`/`alted`/`ctrled`:
+
+```kdl
+insert {
+    self_insert "Insert($)"
+}
+```
+
+Note there's no `base`/`shifted`/`alted`/`ctrled` block at all in this example — an omitted
+grid already defaults to fully unbound today (`ModifierKeymap::default()`), so a mode that's
+*pure* self-insert needs nothing else. A mode that wants explicit overrides (e.g. a future
+Ctrl+W word-delete) would add a `ctrled { ... }` block as normal; that binding is resolved
+first and wins over `self_insert`, which only fires when resolution returns `None`.
+
+Parsing, in `parse_modifier_keymap` (`crates/config/src/keymap.rs:213-247`): today it rejects
+any child node name other than `base`/`shifted`/`alted`/`ctrled` via `KeymapParseError::UnknownModifier`.
+Add a branch for `name == "self_insert"` *before* that rejection:
+- Read the node's first positional string argument the same way `crates/config/src/lib.rs`
+  already extracts the keymap name (`node.entries().iter().find(|e| e.name().is_none()).and_then(|e| e.value().as_string())`,
+  `lib.rs:176-180`). Missing/non-string argument → new error `SelfInsertMissingArgument { location }`.
+- Parse it with `ActionTemplate::from_str`, mapping a parse error to a new error
+  `InvalidSelfInsertAction { location, source: ActionParseError }` (mirrors the existing
+  `InvalidAction { location, source }` variant, `keymap.rs:182-187`).
+- If `.has_hole()` is false, error `SelfInsertMissingHole { location, found }` (`found` = the
+  raw argument string, not a re-rendered template — simplest, and matches how other
+  `KeymapParseError` variants already just echo back the offending input). A self_insert with
+  no hole would silently ignore every keystroke's actual character, which is never what's
+  intended — reject it at config-parse time instead of producing confusing runtime behavior.
+- On success, `modifier_keymap.self_insert = Some(template)`.
+
+New `KeymapParseError` variants (`keymap.rs:161-206`), inserted alongside the existing ones,
+same `thiserror` style:
+- `InvalidSelfInsertAction { location: String, source: ActionParseError }`
+- `SelfInsertMissingArgument { location: String }`
+- `SelfInsertMissingHole { location: String, found: String }`
+
+Tests (`crates/config/src/keymap.rs`'s `mod test`, mirroring the existing `parse`/`err`
+helpers and insta-snapshot style established for `KeymapParseError`):
+- A mode with only `self_insert "Insert($)"` (no grid at all) parses; `ModifierKeymap.self_insert`
+  is `Some`, and `.fill('x')` (via the stored `ActionTemplate`) produces `Action::Insert('x')`.
+- `self_insert "Insert('a')"` (no hole) → `SelfInsertMissingHole`, snapshot.
+- `self_insert "Quit"` (not templatable) → `InvalidSelfInsertAction` wrapping `NotTemplatable`, snapshot.
+- A bare `self_insert` node with no argument → `SelfInsertMissingArgument`, snapshot.
+- An explicit grid binding still resolves ahead of `self_insert` — no new mechanism needed
+  here since `self_insert` is consulted by the *runtime* only after `Keymap::resolve` returns
+  `None` (Part D); this phase's tests just confirm both pieces of data (`self_insert` and the
+  grid) parse and coexist correctly on the same `ModifierKeymap`.
+
+### Part C — `Mode` becomes an open identifier (`crates/action/src/mode.rs`)
+
+Today `Mode` is a closed 2-variant enum (`Normal | Insert`, `#[derive(strum::EnumString, strum::VariantNames)]`).
+For "any mode name works from config alone" to be literally true (not just true for the two
+built-in names), `Mode` needs to stop being a fixed enum:
+
+```rust
+use std::{fmt, str::FromStr, sync::Arc};
+
+/// A user-nameable editor mode. Any string is a valid mode name; the set of
+/// modes is entirely config-driven. `"normal"` and `"insert"` are the only
+/// names the editor's own Rust code still references directly (bootstrap /
+/// fallback entry points — see Part D) — any other name works purely
+/// through config with zero code changes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Mode(Arc<str>);
+
+impl Mode {
+    pub fn new(name: &str) -> Mode {
+        Mode(Arc::from(name.to_ascii_lowercase()))
+    }
+
+    pub fn normal() -> Mode { Mode::new("normal") }
+    pub fn insert() -> Mode { Mode::new("insert") }
+
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl Default for Mode {
+    fn default() -> Self { Mode::normal() }
+}
+
+impl FromStr for Mode {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> { Ok(Mode::new(s)) }
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
+}
+```
+
+`Arc<str>` (not `String`/`Box<str>`) so `Mode` stays cheap to clone even though it can no
+longer be `Copy` — `Arc`'s `PartialEq`/`Eq`/`Hash` compare the pointee's *contents*, not the
+pointer, so this is a drop-in behavioral replacement for the old enum's derived impls.
+Lowercasing in `Mode::new` preserves today's `#[strum(ascii_case_insensitive)]` behavior.
+
+**This removes `Mode::VARIANTS`/`EnumString`/`Copy`, which ripples out:**
+
+- `crates/action/src/action.rs`'s `"ChangeMode"` arm (`action.rs:411-418`) calls
+  `parse_enum_ident::<Mode>(arg, arg_span)`, which requires `Mode: VariantNames`. Since any
+  identifier is now a valid mode name, replace that whole call with `Mode::new(arg)` directly
+  — no error path needed any more for this arm specifically. (`parse_enum_ident`'s generic
+  bound stays as-is for its other callers — `PasteSource`, `DeleteDirection`, `Anchor`,
+  `Direction` — none of those change.)
+- Delete `crates/action/src/action.rs`'s `unknown_mode_value` and
+  `unknown_mode_value_without_a_close_match` tests (in `mod test`) — `"ChangeMode(Insrt)"` and
+  `"ChangeMode(Xyz123)"` are no longer errors, they're just new mode names now. Replace with
+  one test asserting `"ChangeMode(Insrt)".parse::<Action>() == Ok(Action::ChangeMode(Mode::new("insrt")))`,
+  documenting the new permissiveness is intentional.
+- `crates/config/src/keymap.rs`'s `Keymap::parse` (`keymap.rs:129-159`) currently does
+  `Mode::from_str(name).map_err(|_| KeymapParseError::UnknownMode { ... })?` — since
+  `Mode::from_str` is now infallible, replace with `Mode::new(name)` directly and delete the
+  `KeymapParseError::UnknownMode { location, found, valid, did_you_mean }` variant entirely
+  (it can never be constructed any more). Drop the now-unused `action::did_you_mean` import
+  (`keymap.rs:3`) — confirm nothing else in the file still calls it (as of this writing,
+  `UnknownMode` was its only call site in this file).
+- Delete `crates/config/src/keymap.rs`'s `unknown_mode_name_reports_a_suggestion` test — no
+  longer reachable. Replace with a test demonstrating the new openness instead: a
+  `keymap "default" { my_custom_mode { base { home "Quit" } } }` parses successfully and is
+  reachable as `keymap.modes.get(&Mode::new("my_custom_mode"))`.
+- `src/main.rs`'s `GlobalContext`/`Editor` (`src/main.rs:113-146`) and `event_to_action`
+  (`src/main.rs:183-230`) reference `Mode::default()` (fine, unchanged call) and
+  `Mode::Insert`/`Mode::Normal` as enum variants (no longer exist) in five places:
+  - `event_to_action`'s three `self.context.mode == Mode::Insert` guards (lines 191, 201, 206)
+    → `self.context.mode == Mode::insert()`. **These three hardcoded branches are what
+    `self_insert` is meant to eventually replace, but that replacement is Phase 3's job (real
+    dispatch doesn't exist yet — `event_to_action` today never consults `Keymap` at all).
+    This phase only needs the file to keep compiling against the new `Mode` API; it does not
+    remove this hardcoding.**
+  - `process_action`'s `Action::ChangeMode(mode) => { self.context.mode = mode; self.screen.change_mode(mode) }`
+    (`src/main.rs:163-166`) uses `mode` twice — fine when `Mode: Copy`, a use-after-move once
+    it isn't. Change to `self.context.mode = mode.clone(); self.screen.change_mode(mode)`
+    (cheap: `Arc` refcount bump).
+  - `event_to_action`'s `'i' => Some(Action::ChangeMode(Mode::Insert))` (line 209) and
+    `KeyCode::Insert => Some(Action::ChangeMode(Mode::Insert))` (line 204) →
+    `Action::ChangeMode(Mode::insert())`.
+  - `KeyCode::Esc => Some(Action::ChangeMode(Mode::Normal))` (line 215) →
+    `Action::ChangeMode(Mode::normal())`.
+
+**Loose ends flagged, not resolved, by this phase** (record the decision so Phase 3 doesn't
+re-litigate it, but don't build it now):
+
+- `ModifierKeymap` is a slightly misleading name once it also holds `self_insert` (which isn't
+  a modifier grid). Renaming it (e.g. to `ModeKeymap`) is a pure rename with no behavior
+  change — fine to do whenever, not required for this phase, skip unless it's free.
+- Enter/Tab (`KeyCode::Enter`/`KeyCode::Tab`) are hardcoded separately in `event_to_action`
+  today (`src/main.rs:191,201`, `Insert('\n')`/`Insert('\t')`) because they're distinct
+  `KeyCode` variants, not `KeyCode::Char`. Decision made in conversation: when Phase 3 wires up
+  real dispatch, Enter/Tab should be treated as producing the characters `'\n'`/`'\t'` and go
+  through the *same* self-insert-eligible resolution path as `KeyCode::Char`, rather than
+  staying separately special-cased. Recorded here for Phase 3 to pick up; not implemented now.
+
+### Part D — forward reference for Phase 3 (real dispatch)
+
+Not implemented in this phase (Phase 3's dispatch code doesn't exist yet — `event_to_action`
+never consults `Keymap`/`Layout` today). Recorded here so Phase 3 doesn't miss it: once a
+`KeyCode::Char`/Enter/Tab resolves through the position/layout pipeline (`POSITIONAL_KEYMAP_PLAN.md`'s
+existing Phase 3 section) and `Keymap::resolve(mode, ...)` returns `None`, check that mode's
+`ModifierKeymap.self_insert`; if `Some(template)`, the action is `template.fill(the_char)`
+instead of "do nothing". If `None` (today's `Normal` mode, and any mode that doesn't declare
+`self_insert`), an unbound char key stays a no-op, exactly as today.
+
+### Verification for this phase
+
+Pure unit/insta tests in `crates/action` and `crates/config`, run with `cargo test -p action -p config`.
+No manual/interactive verification is possible yet since nothing wires this into real
+keystrokes (that's Phase 3). Also run `cargo build --workspace` to confirm `src/main.rs`'s
+`Mode`-API call sites (Part C) still compile.
+
+---
+
 ## Phase 2 — Layout config schema + parsing (`crates/config/src/layout.rs`)
 
 Structurally simpler than `Keymap` because **there is no fallback at all** —
@@ -412,6 +706,15 @@ Replace the char-handling branches of `Editor::event_to_action`
 `self.context.mode` and the loaded `Config`'s default keymap + active layout.
 Non-char `KeyCode`s are untouched by this phase (per the open question above,
 unless resolved otherwise during implementation).
+
+Additionally (see Phase 1.5, Part D): once a char/Enter/Tab key resolves through this pipeline
+and `Keymap::resolve` returns `None`, check the current mode's `ModifierKeymap.self_insert`
+before falling back to "do nothing" — if it's `Some(template)`, the action is
+`template.fill(the_char)`. This is what finally replaces `event_to_action`'s hardcoded
+`self.context.mode == Mode::insert()` branches (Phase 1.5 only adapted them to keep compiling
+against the new `Mode` API; removing them is this phase's job). Per Phase 1.5's decision,
+Enter/Tab should be folded into this same char-producing path (as `'\n'`/`'\t'`) rather than
+staying separately hardcoded.
 
 ### Verify
 
